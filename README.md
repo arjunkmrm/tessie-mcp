@@ -1,13 +1,6 @@
-# Tessie MCP Extension for Claude Desktop v0.1.6
+# Tessie MCP Extension for Claude Desktop
 
 An advanced Tesla analytics platform for Claude Desktop through the [Tessie API](https://tessie.com). This extension provides 39+ tools for comprehensive vehicle data access, advanced analytics, experimental FSD detection, and data export capabilities.
-
-## 🆕 What's New in v0.1.6
-
-- **Experimental FSD Detection**: Pattern-based estimation of Full Self-Driving usage (unverified, for analysis purposes)
-- **Data Export Tools**: Tax mileage reports, charging cost spreadsheets, comprehensive analytics exports
-- **Advanced Insights**: FSD vs manual efficiency comparisons and usage pattern analysis  
-- **39+ Tools**: Expanded from 31 to 39 comprehensive tools (8 new tools added)
 
 ## Features
 
@@ -15,7 +8,7 @@ An advanced Tesla analytics platform for Claude Desktop through the [Tessie API]
 - **Advanced Analytics**: Efficiency trends, cost analysis, usage patterns over time
 - **Enhanced State Access**: Detailed driving, climate, and vehicle state information  
 - **Smart VIN Resolution**: Automatically detects and uses your active vehicle
-- **31+ Tools Available**: Battery, charging, driving, location, weather, analytics, and more
+- **39+ Tools Available**: Battery, charging, driving, location, weather, analytics, and more
 - **Real-time Data**: Access current vehicle status and historical data
 - **Secure**: API token stored securely in Claude Desktop configuration
 
@@ -90,12 +83,12 @@ The extension requires your Tessie API token to function. You can get your token
 - **get_usage_patterns**: Driving patterns by day of week and hour of day
 - **get_monthly_summary**: Comprehensive monthly driving and charging summary reports
 
-### Experimental FSD Detection (**New in v0.1.6**)
+### Experimental FSD Detection
 - **analyze_drive_fsd_probability**: Estimate FSD usage likelihood for individual drives
 - **get_fsd_usage_summary**: Period-based FSD usage estimation with confidence scores
 - **compare_fsd_manual_efficiency**: Compare efficiency between estimated FSD and manual driving
 
-### Data Export Tools (**New in v0.1.6**)
+### Data Export Tools
 - **export_tax_mileage_report**: Generate tax-ready mileage reports with monthly breakdowns
 - **export_charging_cost_spreadsheet**: Detailed charging cost analysis in spreadsheet format
 - **export_fsd_detection_report**: Comprehensive FSD analysis with methodology and confidence scores
@@ -109,7 +102,7 @@ The extension requires your Tessie API token to function. You can get your token
 - "What's the weather like where my Tesla is parked?"
 - "What's my tire pressure?"
 
-### Advanced Analytics (**New in v0.1.5**)
+### Advanced Analytics
 - "Show me my driving efficiency trends for the last 3 months"
 - "Analyze my charging costs by location type"
 - "What are my driving usage patterns by day of the week?"
@@ -122,13 +115,13 @@ The extension requires your Tessie API token to function. You can get your token
 - "Give me complete vehicle state including doors and windows"
 - "Show me advanced charging state with schedules"
 
-### FSD Detection & Analysis (**New in v0.1.6**)
+### FSD Detection & Analysis
 - "Analyze my recent drives for FSD usage probability" 
 - "What percentage of my driving might have been on FSD this month?"
 - "Compare my efficiency when using FSD vs manual driving"
 - "Generate a comprehensive FSD detection report"
 
-### Data Export (**New in v0.1.6**)
+### Data Export
 - "Export my 2024 mileage data for tax purposes"
 - "Create a spreadsheet of all my charging costs this year"
 - "Generate a comprehensive FSD usage analysis report"
