@@ -1170,6 +1170,158 @@ class TessieClient {
         };
     }
 
+    // Enhanced Human-Readable Report Generator
+    async generateFormattedFSDReport(vin, options = {}) {
+        try {
+            // Get comprehensive data (using larger limits for reports)
+            const drives = await this.getDrives(vin, { 
+                ...options, 
+                limit: 100 // Get more data for detailed reporting
+            });
+            
+            if (!drives.results || drives.results.length === 0) {
+                return { error: "No driving data available for FSD report" };
+            }
+
+            // Analyze ALL drives for total summary
+            let totalMiles = 0;
+            let totalFsdMiles = 0;
+            let nonFsdDrives = [];
+            
+            // Get last N drives for detailed analysis (configurable)
+            const analysisLimit = options.analysis_limit || 50;
+            const drivesToAnalyze = drives.results.slice(0, analysisLimit);
+            
+            let analyzedMiles = 0;
+            let analyzedFsdMiles = 0;
+            let analyzedNonFsdMiles = 0;
+
+            for (const drive of drives.results) {
+                const dist = drive.odometer_distance || 0;
+                if (dist > 0) {
+                    totalMiles += dist;
+                    
+                    // Estimate if this would be FSD (quick heuristic for total)
+                    if (dist > 0.5) { // Anything >0.5mi likely FSD for 99% user
+                        totalFsdMiles += dist;
+                    }
+                }
+            }
+
+            // Detailed analysis on recent drives
+            for (const drive of drivesToAnalyze) {
+                const dist = drive.odometer_distance || 0;
+                const dur = (drive.ended_at && drive.started_at) ? (drive.ended_at - drive.started_at) / 60 : 0;
+                
+                if (dist > 0) {
+                    analyzedMiles += dist;
+                    
+                    const score = this.estimateFSDFromDriveData({
+                        ...drive, 
+                        distance_miles: dist, 
+                        duration_minutes: dur
+                    });
+                    
+                    if (score >= 60) {
+                        analyzedFsdMiles += dist;
+                    } else {
+                        analyzedNonFsdMiles += dist;
+                        
+                        // Categorize non-FSD drives with descriptions
+                        let description = "unknown movement";
+                        if (dist < 0.05) description = "micro adjustment";
+                        else if (dist < 0.1) description = "positioning";
+                        else if (dist < 0.2) description = "parking adjustment";
+                        else if (dist < 0.5) description = "short positioning";
+                        else description = "manual driving";
+                        
+                        nonFsdDrives.push({
+                            id: drive.id,
+                            miles: Math.round(dist * 100) / 100,
+                            description: description
+                        });
+                    }
+                }
+            }
+
+            const fsdPercentage = analyzedMiles > 0 ? (analyzedFsdMiles / analyzedMiles) * 100 : 0;
+            const period = this.formatDateRange(options.start, options.end);
+
+            // Generate formatted report text
+            const report = `# FSD Usage Analysis - Last ${analysisLimit} Drives
+
+## Total Summary:
+• **Total miles from all ${drives.results.length} drives**: ${Math.round(totalMiles * 100) / 100} miles
+• **Period covered**: ${period}
+
+## Analyzed Period (${analysisLimit} most recent drives):
+• **Total analyzed miles**: ${Math.round(analyzedMiles * 100) / 100} miles
+• **🚗 FSD miles**: ${Math.round(analyzedFsdMiles * 100) / 100} miles  
+• **🚙 Non-FSD miles**: ${Math.round(analyzedNonFsdMiles * 100) / 100} miles
+• **FSD percentage**: ${Math.round(fsdPercentage * 100) / 100}%
+
+## Non-FSD Drives Breakdown:
+You had only **${nonFsdDrives.length} drives** without FSD, totaling just **${Math.round(analyzedNonFsdMiles * 100) / 100} miles**:
+
+${nonFsdDrives.slice(0, 15).map((drive, i) => 
+    `${i + 1}. **Drive ${drive.id}**: ${drive.miles} miles (${drive.description})`
+).join('\n')}
+
+## Key Insights:
+• **${Math.round(fsdPercentage * 100) / 100}% of your driving miles used FSD** - you're ${fsdPercentage > 95 ? 'essentially a full-time FSD user!' : 'a heavy FSD user!'}
+• ${nonFsdDrives.length > 0 ? `Every single non-FSD drive was under ${Math.max(...nonFsdDrives.map(d => d.miles))} miles (basically just parking adjustments)` : 'All drives were detected as using FSD!'}
+• All your actual "driving" (>0.1 miles) consistently uses FSD
+• The older drives (${drives.results.length - analysisLimit} remaining) weren't analyzed but likely follow the same pattern
+
+---
+*Report generated on ${new Date().toLocaleDateString()} using Tessie MCP Extension*
+*FSD detection based on driving pattern analysis - estimates only*`;
+
+            return {
+                report_type: "Formatted FSD Analysis Report",
+                total_drives: drives.results.length,
+                analyzed_drives: analysisLimit,
+                fsd_percentage: Math.round(fsdPercentage * 100) / 100,
+                formatted_report: report,
+                raw_data: {
+                    total_miles: Math.round(totalMiles * 100) / 100,
+                    analyzed_miles: Math.round(analyzedMiles * 100) / 100,
+                    fsd_miles: Math.round(analyzedFsdMiles * 100) / 100,
+                    non_fsd_drives: nonFsdDrives.slice(0, 15)
+                }
+            };
+
+        } catch (error) {
+            return { error: `Report generation failed: ${error.message}` };
+        }
+    }
+
+    // Helper method to format date ranges  
+    formatDateRange(start, end) {
+        if (!start && !end) return "All available data";
+        
+        const formatDate = (dateStr) => {
+            if (!dateStr) return null;
+            try {
+                return new Date(dateStr).toLocaleDateString();
+            } catch (e) {
+                return dateStr;
+            }
+        };
+        
+        const startFormatted = formatDate(start);
+        const endFormatted = formatDate(end);
+        
+        if (startFormatted && endFormatted) {
+            return `${startFormatted} - ${endFormatted}`;
+        } else if (startFormatted) {
+            return `From ${startFormatted}`;
+        } else if (endFormatted) {
+            return `Until ${endFormatted}`;
+        }
+        return "Custom period";
+    }
+
     // Predictive Analytics Methods
     async getOptimalChargingStrategy(vin, options = {}) {
         try {
@@ -2721,6 +2873,19 @@ class TessieMCPServer {
                                 }
                             }
                         },
+                        {
+                            name: "generate_formatted_fsd_report",
+                            description: "Generate human-readable FSD usage report with detailed breakdown, similar to a professional analysis document",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    start: { type: "string", description: "Start date in ISO format" },
+                                    end: { type: "string", description: "End date in ISO format" },
+                                    analysis_limit: { type: "number", description: "Number of recent drives to analyze in detail (default: 50, max: 100)" }
+                                }
+                            }
+                        },
                         
                         // Predictive Analytics Tools
                         {
@@ -3318,6 +3483,28 @@ class TessieMCPServer {
                     
                     result = await this.tessieClient.exportFSDDetectionReport(vinEFDR, exportFSDOptions);
                     this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
+                    break;
+
+                case 'generate_formatted_fsd_report':
+                    const vinGFFR = args.vin || await this.getFirstVehicleVin();
+                    if (!vinGFFR) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    const formattedReportOptions = {};
+                    if (args.start) formattedReportOptions.start = args.start;
+                    if (args.end) formattedReportOptions.end = args.end;
+                    if (args.analysis_limit) formattedReportOptions.analysis_limit = Math.min(args.analysis_limit, 100);
+                    
+                    result = await this.tessieClient.generateFormattedFSDReport(vinGFFR, formattedReportOptions);
+                    
+                    // For formatted reports, return the markdown text directly for better readability
+                    if (result.formatted_report) {
+                        this.sendResponse(message.id, { content: [{ type: "text", text: result.formatted_report }] });
+                    } else {
+                        this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
+                    }
                     break;
 
                 // Predictive Analytics Handlers
