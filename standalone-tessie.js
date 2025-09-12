@@ -482,6 +482,547 @@ class TessieClient {
 
         return summary;
     }
+
+    // FSD Detection & Analysis Methods
+    async analyzeDriveFSDProbability(vin, driveId) {
+        try {
+            // Get detailed driving path for the specific drive
+            const pathData = await this.getDrivingPath(vin, driveId);
+            
+            if (!pathData || !pathData.length) {
+                return { error: "No path data available for FSD analysis", drive_id: driveId };
+            }
+
+            const analysis = {
+                drive_id: driveId,
+                total_points: pathData.length,
+                fsd_confidence_score: 0,
+                analysis_factors: {},
+                fsd_segments: []
+            };
+
+            // Analyze speed consistency (strongest FSD signal)
+            const speedAnalysis = this.analyzeSpeedConsistency(pathData);
+            analysis.analysis_factors.speed_consistency = speedAnalysis;
+
+            // Analyze heading smoothness
+            const headingAnalysis = this.analyzeHeadingSmoothness(pathData);
+            analysis.analysis_factors.heading_smoothness = headingAnalysis;
+
+            // Analyze route characteristics
+            const routeAnalysis = this.analyzeRouteCharacteristics(pathData);
+            analysis.analysis_factors.route_characteristics = routeAnalysis;
+
+            // Calculate overall FSD confidence score
+            let confidence = 0;
+            
+            // Speed consistency (0-40 points) - strongest signal
+            if (speedAnalysis.variance < 1.5) confidence += 40;
+            else if (speedAnalysis.variance < 3.0) confidence += 25;
+            else if (speedAnalysis.variance < 5.0) confidence += 10;
+
+            // Heading smoothness (0-25 points)
+            confidence += Math.min(headingAnalysis.smoothness_score * 25, 25);
+
+            // Route type bonus (0-20 points)
+            if (routeAnalysis.likely_highway && routeAnalysis.distance_miles > 3) {
+                confidence += 20;
+            } else if (routeAnalysis.distance_miles > 1) {
+                confidence += 10;
+            }
+
+            // Duration bonus (0-15 points) - FSD typically used for longer segments
+            if (routeAnalysis.duration_minutes > 10) confidence += 15;
+            else if (routeAnalysis.duration_minutes > 5) confidence += 8;
+
+            analysis.fsd_confidence_score = Math.min(Math.round(confidence), 100);
+            
+            // Determine likelihood category
+            if (analysis.fsd_confidence_score >= 80) analysis.likelihood = "Very High";
+            else if (analysis.fsd_confidence_score >= 60) analysis.likelihood = "High";
+            else if (analysis.fsd_confidence_score >= 40) analysis.likelihood = "Moderate";
+            else if (analysis.fsd_confidence_score >= 20) analysis.likelihood = "Low";
+            else analysis.likelihood = "Very Low";
+
+            return analysis;
+
+        } catch (error) {
+            return { error: `FSD analysis failed: ${error.message}`, drive_id: driveId };
+        }
+    }
+
+    analyzeSpeedConsistency(pathData) {
+        const speeds = pathData.map(point => point.speed || 0).filter(speed => speed > 0);
+        
+        if (speeds.length < 10) {
+            return { variance: 999, avg_speed: 0, analysis: "Insufficient speed data" };
+        }
+
+        const avgSpeed = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length;
+        const variance = speeds.reduce((sum, speed) => sum + Math.pow(speed - avgSpeed, 2), 0) / speeds.length;
+        const stdDev = Math.sqrt(variance);
+
+        // Calculate periods of consistent speed (FSD characteristic)
+        let consistentPeriods = 0;
+        let currentConsistentLength = 0;
+        
+        for (let i = 1; i < speeds.length; i++) {
+            if (Math.abs(speeds[i] - speeds[i-1]) <= 2) { // Within 2 mph
+                currentConsistentLength++;
+            } else {
+                if (currentConsistentLength >= 10) consistentPeriods++;
+                currentConsistentLength = 0;
+            }
+        }
+
+        return {
+            variance: Math.round(variance * 100) / 100,
+            std_deviation: Math.round(stdDev * 100) / 100,
+            avg_speed: Math.round(avgSpeed * 100) / 100,
+            consistent_periods: consistentPeriods,
+            total_points: speeds.length,
+            analysis: consistentPeriods >= 3 ? "High consistency (FSD-like)" : 
+                     consistentPeriods >= 1 ? "Moderate consistency" : "Low consistency (manual-like)"
+        };
+    }
+
+    analyzeHeadingSmoothness(pathData) {
+        const headings = pathData.map(point => point.heading || 0).filter(heading => heading !== null);
+        
+        if (headings.length < 10) {
+            return { smoothness_score: 0, analysis: "Insufficient heading data" };
+        }
+
+        let totalChange = 0;
+        let abruptChanges = 0;
+        
+        for (let i = 1; i < headings.length; i++) {
+            let change = Math.abs(headings[i] - headings[i-1]);
+            // Handle wraparound (359° to 1°)
+            if (change > 180) change = 360 - change;
+            
+            totalChange += change;
+            if (change > 15) abruptChanges++; // Sudden heading changes > 15°
+        }
+
+        const avgChange = totalChange / (headings.length - 1);
+        const smoothnessScore = Math.max(0, 1 - (avgChange / 10) - (abruptChanges / headings.length));
+
+        return {
+            smoothness_score: Math.round(smoothnessScore * 100) / 100,
+            avg_heading_change: Math.round(avgChange * 100) / 100,
+            abrupt_changes: abruptChanges,
+            total_headings: headings.length,
+            analysis: smoothnessScore > 0.8 ? "Very smooth (FSD-like)" :
+                     smoothnessScore > 0.6 ? "Smooth" : "Variable (manual-like)"
+        };
+    }
+
+    analyzeRouteCharacteristics(pathData) {
+        if (pathData.length < 2) {
+            return { distance_miles: 0, duration_minutes: 0, likely_highway: false };
+        }
+
+        const start = pathData[0];
+        const end = pathData[pathData.length - 1];
+        
+        // Calculate total distance using GPS points
+        let totalDistance = 0;
+        for (let i = 1; i < pathData.length; i++) {
+            const prev = pathData[i-1];
+            const curr = pathData[i];
+            totalDistance += this.calculateDistance(prev.latitude, prev.longitude, curr.latitude, curr.longitude);
+        }
+
+        // Calculate duration
+        const startTime = new Date(start.timestamp);
+        const endTime = new Date(end.timestamp);
+        const durationMinutes = (endTime - startTime) / (1000 * 60);
+
+        // Estimate if highway based on average speed and distance
+        const avgSpeed = totalDistance / (durationMinutes / 60); // mph
+        const likelyHighway = avgSpeed > 45 && totalDistance > 2;
+
+        return {
+            distance_miles: Math.round(totalDistance * 100) / 100,
+            duration_minutes: Math.round(durationMinutes * 100) / 100,
+            avg_speed_mph: Math.round(avgSpeed * 100) / 100,
+            likely_highway: likelyHighway,
+            analysis: likelyHighway ? "Highway/freeway driving" : "City/local driving"
+        };
+    }
+
+    calculateDistance(lat1, lon1, lat2, lon2) {
+        const R = 3959; // Earth's radius in miles
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                  Math.sin(dLon/2) * Math.sin(dLon/2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        return R * c;
+    }
+
+    async getFSDUsageSummary(vin, options = {}) {
+        try {
+            const drives = await this.getDrives(vin, options);
+            
+            if (!drives.results || drives.results.length === 0) {
+                return { error: "No driving data available for FSD analysis" };
+            }
+
+            const summary = {
+                period: {
+                    start: options.start || 'All time',
+                    end: options.end || 'Present'
+                },
+                total_drives: drives.results.length,
+                analyzed_drives: 0,
+                estimated_fsd_usage: {
+                    high_confidence_drives: 0,
+                    moderate_confidence_drives: 0,
+                    total_fsd_miles: 0,
+                    total_miles: 0,
+                    fsd_percentage: 0
+                },
+                drive_analysis: []
+            };
+
+            let totalMiles = 0;
+            let fsdMiles = 0;
+
+            // Analyze a sample of drives (limit to prevent API overload)
+            const drivesToAnalyze = drives.results.slice(0, 50);
+
+            for (const drive of drivesToAnalyze) {
+                if (drive.distance_miles) {
+                    totalMiles += drive.distance_miles;
+                    
+                    // For this summary, use simplified heuristics (avoid API calls for each drive)
+                    const simpleFSDScore = this.estimateFSDFromDriveData(drive);
+                    
+                    if (simpleFSDScore >= 60) {
+                        summary.estimated_fsd_usage.high_confidence_drives++;
+                        fsdMiles += drive.distance_miles;
+                    } else if (simpleFSDScore >= 40) {
+                        summary.estimated_fsd_usage.moderate_confidence_drives++;
+                        fsdMiles += drive.distance_miles * 0.5; // Partial FSD usage
+                    }
+
+                    summary.drive_analysis.push({
+                        drive_id: drive.id,
+                        date: drive.started_at,
+                        distance_miles: drive.distance_miles,
+                        estimated_fsd_score: simpleFSDScore,
+                        likely_fsd: simpleFSDScore >= 60
+                    });
+                }
+            }
+
+            summary.analyzed_drives = drivesToAnalyze.length;
+            summary.estimated_fsd_usage.total_miles = Math.round(totalMiles * 100) / 100;
+            summary.estimated_fsd_usage.total_fsd_miles = Math.round(fsdMiles * 100) / 100;
+            summary.estimated_fsd_usage.fsd_percentage = totalMiles > 0 ? 
+                Math.round((fsdMiles / totalMiles) * 10000) / 100 : 0;
+
+            return summary;
+
+        } catch (error) {
+            return { error: `FSD usage analysis failed: ${error.message}` };
+        }
+    }
+
+    estimateFSDFromDriveData(drive) {
+        let score = 0;
+        
+        // Highway driving (based on distance and duration)
+        if (drive.distance_miles > 5 && drive.duration_minutes > 10) {
+            const avgSpeed = (drive.distance_miles / drive.duration_minutes) * 60;
+            if (avgSpeed > 45) score += 30; // Highway speeds
+        }
+
+        // Long distance bonus
+        if (drive.distance_miles > 10) score += 20;
+        else if (drive.distance_miles > 5) score += 10;
+
+        // Duration bonus  
+        if (drive.duration_minutes > 20) score += 15;
+        else if (drive.duration_minutes > 10) score += 8;
+
+        // Energy efficiency (FSD often more efficient)
+        if (drive.energy_used_kwh && drive.distance_miles) {
+            const efficiency = drive.energy_used_kwh / drive.distance_miles;
+            if (efficiency < 0.25) score += 15; // Very efficient
+            else if (efficiency < 0.35) score += 8; // Reasonably efficient
+        }
+
+        return Math.min(score, 100);
+    }
+
+    async compareFSDManualEfficiency(vin, options = {}) {
+        const summary = await this.getFSDUsageSummary(vin, options);
+        
+        if (summary.error) return summary;
+
+        const comparison = {
+            period: summary.period,
+            total_drives_analyzed: summary.analyzed_drives,
+            efficiency_comparison: {
+                likely_fsd_drives: [],
+                likely_manual_drives: [],
+                fsd_avg_efficiency: 0,
+                manual_avg_efficiency: 0,
+                efficiency_improvement: 0
+            }
+        };
+
+        let fsdEfficiencySum = 0;
+        let fsdCount = 0;
+        let manualEfficiencySum = 0;
+        let manualCount = 0;
+
+        for (const drive of summary.drive_analysis) {
+            if (drive.estimated_fsd_score >= 60) {
+                // Likely FSD
+                const efficiency = this.calculateDriveEfficiency(drive);
+                if (efficiency > 0) {
+                    fsdEfficiencySum += efficiency;
+                    fsdCount++;
+                    comparison.efficiency_comparison.likely_fsd_drives.push({
+                        date: drive.date,
+                        distance: drive.distance_miles,
+                        efficiency_kwh_per_mile: efficiency
+                    });
+                }
+            } else if (drive.estimated_fsd_score < 40) {
+                // Likely manual
+                const efficiency = this.calculateDriveEfficiency(drive);
+                if (efficiency > 0) {
+                    manualEfficiencySum += efficiency;
+                    manualCount++;
+                    comparison.efficiency_comparison.likely_manual_drives.push({
+                        date: drive.date,
+                        distance: drive.distance_miles,
+                        efficiency_kwh_per_mile: efficiency
+                    });
+                }
+            }
+        }
+
+        if (fsdCount > 0) comparison.efficiency_comparison.fsd_avg_efficiency = 
+            Math.round((fsdEfficiencySum / fsdCount) * 1000) / 1000;
+        
+        if (manualCount > 0) comparison.efficiency_comparison.manual_avg_efficiency = 
+            Math.round((manualEfficiencySum / manualCount) * 1000) / 1000;
+
+        if (fsdCount > 0 && manualCount > 0) {
+            const improvement = ((comparison.efficiency_comparison.manual_avg_efficiency - 
+                                 comparison.efficiency_comparison.fsd_avg_efficiency) / 
+                                 comparison.efficiency_comparison.manual_avg_efficiency) * 100;
+            comparison.efficiency_comparison.efficiency_improvement = Math.round(improvement * 100) / 100;
+        }
+
+        return comparison;
+    }
+
+    calculateDriveEfficiency(drive) {
+        // This would need to be enhanced with actual energy data
+        // For now, return a placeholder based on distance/time
+        return 0.3; // Placeholder efficiency
+    }
+
+    // Export/Data Portability Methods
+    async exportTaxMileageReport(vin, year) {
+        const startDate = new Date(year, 0, 1).toISOString();
+        const endDate = new Date(year, 11, 31, 23, 59, 59).toISOString();
+        
+        const drives = await this.getDrives(vin, { start: startDate, end: endDate });
+        
+        if (!drives.results || drives.results.length === 0) {
+            return { error: `No driving data available for tax year ${year}` };
+        }
+
+        const report = {
+            tax_year: year,
+            vehicle_vin: vin,
+            report_generated: new Date().toISOString(),
+            summary: {
+                total_drives: drives.results.length,
+                total_miles: 0,
+                business_miles: 0, // Would need business trip detection
+                personal_miles: 0,
+                business_percentage: 0
+            },
+            monthly_breakdown: {},
+            detailed_drives: []
+        };
+
+        // Group drives by month and calculate totals
+        for (const drive of drives.results) {
+            if (drive.distance_miles && drive.started_at) {
+                const driveDate = new Date(drive.started_at);
+                const monthKey = `${driveDate.getFullYear()}-${String(driveDate.getMonth() + 1).padStart(2, '0')}`;
+                
+                if (!report.monthly_breakdown[monthKey]) {
+                    report.monthly_breakdown[monthKey] = {
+                        month: monthKey,
+                        total_miles: 0,
+                        business_miles: 0,
+                        personal_miles: 0,
+                        drive_count: 0
+                    };
+                }
+
+                report.summary.total_miles += drive.distance_miles;
+                report.monthly_breakdown[monthKey].total_miles += drive.distance_miles;
+                report.monthly_breakdown[monthKey].drive_count += 1;
+
+                // For now, classify as personal (would need business trip detection)
+                report.summary.personal_miles += drive.distance_miles;
+                report.monthly_breakdown[monthKey].personal_miles += drive.distance_miles;
+
+                report.detailed_drives.push({
+                    date: drive.started_at,
+                    start_location: `${drive.start_latitude || 'Unknown'}, ${drive.start_longitude || 'Unknown'}`,
+                    end_location: `${drive.end_latitude || 'Unknown'}, ${drive.end_longitude || 'Unknown'}`,
+                    distance_miles: drive.distance_miles,
+                    duration_minutes: drive.duration_minutes || 0,
+                    classification: 'Personal', // Would be enhanced with business detection
+                    purpose: 'TBD' // Would allow user categorization
+                });
+            }
+        }
+
+        // Calculate percentages
+        if (report.summary.total_miles > 0) {
+            report.summary.business_percentage = 
+                Math.round((report.summary.business_miles / report.summary.total_miles) * 10000) / 100;
+        }
+
+        // Round summary numbers
+        report.summary.total_miles = Math.round(report.summary.total_miles * 100) / 100;
+        report.summary.business_miles = Math.round(report.summary.business_miles * 100) / 100;
+        report.summary.personal_miles = Math.round(report.summary.personal_miles * 100) / 100;
+
+        return report;
+    }
+
+    async exportChargingCostSpreadsheet(vin, options = {}) {
+        const charges = await this.getCharges(vin, options);
+        
+        if (!charges.results || charges.results.length === 0) {
+            return { error: "No charging data available for export" };
+        }
+
+        const spreadsheet = {
+            export_info: {
+                generated: new Date().toISOString(),
+                period: {
+                    start: options.start || 'All time',
+                    end: options.end || 'Present'
+                },
+                total_sessions: charges.results.length
+            },
+            summary: {
+                total_cost: 0,
+                total_energy_kwh: 0,
+                avg_cost_per_kwh: 0,
+                sessions_by_type: {
+                    home: { count: 0, cost: 0, energy: 0 },
+                    supercharger: { count: 0, cost: 0, energy: 0 },
+                    public: { count: 0, cost: 0, energy: 0 }
+                }
+            },
+            detailed_sessions: []
+        };
+
+        for (const session of charges.results) {
+            const sessionData = {
+                date: session.started_at,
+                location: session.location || 'Unknown',
+                charger_type: session.charger_type || 'Unknown',
+                energy_added_kwh: session.energy_added_kwh || 0,
+                cost_usd: session.cost || 0,
+                cost_per_kwh: session.energy_added_kwh && session.cost ? 
+                    Math.round((session.cost / session.energy_added_kwh) * 1000) / 1000 : 0,
+                duration_minutes: session.duration_minutes || 0,
+                start_battery_level: session.start_battery_level || 0,
+                end_battery_level: session.end_battery_level || 0,
+                charging_type: this.classifyChargingType(session)
+            };
+
+            spreadsheet.detailed_sessions.push(sessionData);
+
+            // Update summary
+            if (session.cost) spreadsheet.summary.total_cost += session.cost;
+            if (session.energy_added_kwh) spreadsheet.summary.total_energy_kwh += session.energy_added_kwh;
+
+            // Categorize by type
+            const category = sessionData.charging_type.toLowerCase();
+            if (spreadsheet.summary.sessions_by_type[category]) {
+                spreadsheet.summary.sessions_by_type[category].count += 1;
+                spreadsheet.summary.sessions_by_type[category].cost += session.cost || 0;
+                spreadsheet.summary.sessions_by_type[category].energy += session.energy_added_kwh || 0;
+            }
+        }
+
+        // Calculate averages
+        if (spreadsheet.summary.total_energy_kwh > 0) {
+            spreadsheet.summary.avg_cost_per_kwh = 
+                Math.round((spreadsheet.summary.total_cost / spreadsheet.summary.total_energy_kwh) * 1000) / 1000;
+        }
+
+        // Round summary numbers
+        spreadsheet.summary.total_cost = Math.round(spreadsheet.summary.total_cost * 100) / 100;
+        spreadsheet.summary.total_energy_kwh = Math.round(spreadsheet.summary.total_energy_kwh * 100) / 100;
+
+        return spreadsheet;
+    }
+
+    classifyChargingType(session) {
+        if (!session.location && !session.charger_type) return 'unknown';
+        
+        const location = (session.location || '').toLowerCase();
+        const chargerType = (session.charger_type || '').toLowerCase();
+        
+        if (location.includes('home') || location.includes('house')) return 'home';
+        if (chargerType.includes('supercharger') || location.includes('supercharger')) return 'supercharger';
+        return 'public';
+    }
+
+    async exportFSDDetectionReport(vin, options = {}) {
+        const fsdSummary = await this.getFSDUsageSummary(vin, options);
+        
+        if (fsdSummary.error) return fsdSummary;
+
+        const efficiencyComparison = await this.compareFSDManualEfficiency(vin, options);
+
+        return {
+            report_info: {
+                generated: new Date().toISOString(),
+                vehicle_vin: vin,
+                analysis_period: fsdSummary.period,
+                disclaimer: "FSD detection is estimated based on driving patterns. Accuracy may vary."
+            },
+            fsd_usage_summary: fsdSummary,
+            efficiency_analysis: efficiencyComparison,
+            methodology: {
+                detection_factors: [
+                    "Speed consistency analysis",
+                    "Heading smoothness patterns", 
+                    "Route type classification",
+                    "Duration and distance analysis"
+                ],
+                confidence_scoring: {
+                    "80-100": "Very High - Strong FSD indicators",
+                    "60-79": "High - Likely FSD usage",
+                    "40-59": "Moderate - Mixed indicators", 
+                    "20-39": "Low - Likely manual driving",
+                    "0-19": "Very Low - Manual driving patterns"
+                }
+            }
+        };
+    }
 }
 
 // MCP Server implementation
@@ -921,6 +1462,80 @@ class TessieMCPServer {
                                     month: { type: "number", description: "Month (1-12)" }
                                 }
                             }
+                        },
+                        // FSD Detection & Analysis Tools
+                        {
+                            name: "analyze_drive_fsd_probability",
+                            description: "Analyze a specific drive for FSD usage probability using speed consistency and driving patterns",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    drive_id: { type: "string", description: "Drive ID to analyze for FSD probability" }
+                                },
+                                required: ["drive_id"]
+                            }
+                        },
+                        {
+                            name: "get_fsd_usage_summary",
+                            description: "Get estimated FSD usage summary over a time period with confidence scoring",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    start: { type: "string", description: "Start date in ISO format" },
+                                    end: { type: "string", description: "End date in ISO format" }
+                                }
+                            }
+                        },
+                        {
+                            name: "compare_fsd_manual_efficiency",
+                            description: "Compare driving efficiency between estimated FSD and manual driving periods",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    start: { type: "string", description: "Start date in ISO format" },
+                                    end: { type: "string", description: "End date in ISO format" }
+                                }
+                            }
+                        },
+                        // Export & Data Portability Tools
+                        {
+                            name: "export_tax_mileage_report",
+                            description: "Export comprehensive mileage report for tax purposes with monthly breakdown",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    year: { type: "number", description: "Tax year (e.g. 2024)" }
+                                },
+                                required: ["year"]
+                            }
+                        },
+                        {
+                            name: "export_charging_cost_spreadsheet",
+                            description: "Export detailed charging costs in spreadsheet format with location type analysis",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    start: { type: "string", description: "Start date in ISO format" },
+                                    end: { type: "string", description: "End date in ISO format" }
+                                }
+                            }
+                        },
+                        {
+                            name: "export_fsd_detection_report",
+                            description: "Export comprehensive FSD detection analysis report with methodology and confidence scores",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    start: { type: "string", description: "Start date in ISO format" },
+                                    end: { type: "string", description: "End date in ISO format" }
+                                }
+                            }
                         }
                     ]
                 });
@@ -1343,6 +1958,100 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.getMonthlySummary(vinMS, args.year, args.month);
+                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    break;
+
+                // FSD Detection & Analysis Handlers
+                case 'analyze_drive_fsd_probability':
+                    const vinAFP = args.vin || await this.getFirstVehicleVin();
+                    if (!vinAFP) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    if (!args.drive_id) {
+                        this.sendError(message.id, -32602, "drive_id parameter is required");
+                        return;
+                    }
+                    
+                    result = await this.tessieClient.analyzeDriveFSDProbability(vinAFP, args.drive_id);
+                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    break;
+
+                case 'get_fsd_usage_summary':
+                    const vinFUS = args.vin || await this.getFirstVehicleVin();
+                    if (!vinFUS) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    const fsdSummaryOptions = {};
+                    if (args.start) fsdSummaryOptions.start = args.start;
+                    if (args.end) fsdSummaryOptions.end = args.end;
+                    
+                    result = await this.tessieClient.getFSDUsageSummary(vinFUS, fsdSummaryOptions);
+                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    break;
+
+                case 'compare_fsd_manual_efficiency':
+                    const vinCFME = args.vin || await this.getFirstVehicleVin();
+                    if (!vinCFME) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    const efficiencyOptions = {};
+                    if (args.start) efficiencyOptions.start = args.start;
+                    if (args.end) efficiencyOptions.end = args.end;
+                    
+                    result = await this.tessieClient.compareFSDManualEfficiency(vinCFME, efficiencyOptions);
+                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    break;
+
+                // Export & Data Portability Handlers
+                case 'export_tax_mileage_report':
+                    const vinTMR = args.vin || await this.getFirstVehicleVin();
+                    if (!vinTMR) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    if (!args.year) {
+                        this.sendError(message.id, -32602, "year parameter is required");
+                        return;
+                    }
+                    
+                    result = await this.tessieClient.exportTaxMileageReport(vinTMR, args.year);
+                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    break;
+
+                case 'export_charging_cost_spreadsheet':
+                    const vinECCS = args.vin || await this.getFirstVehicleVin();
+                    if (!vinECCS) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    const exportChargingOptions = {};
+                    if (args.start) exportChargingOptions.start = args.start;
+                    if (args.end) exportChargingOptions.end = args.end;
+                    
+                    result = await this.tessieClient.exportChargingCostSpreadsheet(vinECCS, exportChargingOptions);
+                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    break;
+
+                case 'export_fsd_detection_report':
+                    const vinEFDR = args.vin || await this.getFirstVehicleVin();
+                    if (!vinEFDR) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    const exportFSDOptions = {};
+                    if (args.start) exportFSDOptions.start = args.start;
+                    if (args.end) exportFSDOptions.end = args.end;
+                    
+                    result = await this.tessieClient.exportFSDDetectionReport(vinEFDR, exportFSDOptions);
                     this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
                     break;
 

@@ -2,8 +2,8 @@
   "dxt_version": "0.1",
   "name": "tessie",
   "display_name": "Tessie",
-  "version": "0.1.5",
-  "description": "Enhanced Tesla data access through Tessie API - 31+ tools including advanced analytics, efficiency trends, cost analysis, usage patterns, and comprehensive vehicle state data. Complete API coverage with smart insights.",
+  "version": "0.1.6",
+  "description": "Advanced Tesla analytics through Tessie API - 39+ tools including experimental FSD detection, export capabilities, efficiency analysis, and comprehensive vehicle data. Complete API coverage with intelligent insights.",
   "author": {
     "name": "keithah@github"
   },
