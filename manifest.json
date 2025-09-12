@@ -2,10 +2,10 @@
   "dxt_version": "0.1",
   "name": "tessie",
   "display_name": "Tessie",
-  "version": "0.1.0",
-  "description": "Comprehensive Tesla vehicle data access through Tessie API - 22+ tools for battery, charging, driving, location, weather, status, and more. All endpoints tested and working.",
+  "version": "0.1.5",
+  "description": "Enhanced Tesla data access through Tessie API - 31+ tools including advanced analytics, efficiency trends, cost analysis, usage patterns, and comprehensive vehicle state data. Complete API coverage with smart insights.",
   "author": {
-    "name": "Keith"
+    "name": "keithah@github"
   },
   "keywords": ["tesla", "tessie", "vehicle", "car", "mileage", "location", "driving", "battery", "charging", "weather", "tire-pressure", "consumption"],
   "server": {

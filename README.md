@@ -1,12 +1,21 @@
-# Tessie MCP Extension for Claude Desktop
+# Tessie MCP Extension for Claude Desktop v0.1.5
 
-A comprehensive Tesla vehicle data access extension for Claude Desktop through the [Tessie API](https://tessie.com). This extension provides 22+ tools for accessing all aspects of your Tesla vehicle data including battery status, charging information, driving history, location data, weather conditions, and much more.
+An advanced Tesla vehicle data access extension for Claude Desktop through the [Tessie API](https://tessie.com). This extension provides 31+ tools for comprehensive vehicle data access, advanced analytics, and intelligent insights about your Tesla.
+
+## 🆕 What's New in v0.1.5
+
+- **Advanced Analytics**: Efficiency trends, cost analysis, and usage pattern insights
+- **Enhanced State Data**: Detailed access to drive_state, climate_state, vehicle_state data
+- **Smart Insights**: Monthly summaries, charging cost breakdowns, and driving pattern analysis
+- **31+ Tools**: Expanded from 22 to 31 comprehensive data access tools
 
 ## Features
 
 - **Complete Tesla Data Access**: All Tessie API GET endpoints for vehicle data
+- **Advanced Analytics**: Efficiency trends, cost analysis, usage patterns over time
+- **Enhanced State Access**: Detailed driving, climate, and vehicle state information  
 - **Smart VIN Resolution**: Automatically detects and uses your active vehicle
-- **22+ Tools Available**: Battery, charging, driving, location, weather, tire pressure, consumption, and more
+- **31+ Tools Available**: Battery, charging, driving, location, weather, analytics, and more
 - **Real-time Data**: Access current vehicle status and historical data
 - **Secure**: API token stored securely in Claude Desktop configuration
 
@@ -68,16 +77,40 @@ The extension requires your Tessie API token to function. You can get your token
 - **get_latest_alert**: Get the most recent vehicle alert
 - **get_service_data**: Get vehicle service information
 
+### Enhanced State Access
+- **get_drive_state**: Detailed driving state with speed, heading, GPS, active route
+- **get_climate_state**: Comprehensive HVAC, seat heaters, cabin temperature data
+- **get_detailed_vehicle_state**: Complete vehicle state - doors, windows, locks, odometer, software
+- **get_charge_state**: Advanced charging state with schedules and detailed metrics
+- **get_gui_settings**: User interface settings, units, time format, display preferences
+
+### Advanced Analytics & Insights
+- **get_efficiency_trends**: Analyze driving efficiency over time with daily breakdowns
+- **get_charging_cost_analysis**: Cost analysis by charging location (home/supercharger/public)
+- **get_usage_patterns**: Driving patterns by day of week and hour of day
+- **get_monthly_summary**: Comprehensive monthly driving and charging summary reports
+
 ## Usage Examples
 
-Once installed, you can use the tools in Claude Desktop by asking questions like:
-
+### Basic Vehicle Information
 - "What's my Tesla's current battery level?"
 - "Show me my recent driving history"
 - "Where is my car located right now?"
 - "What's the weather like where my Tesla is parked?"
-- "How much did my last charging session cost?"
 - "What's my tire pressure?"
+
+### Advanced Analytics (**New in v0.1.5**)
+- "Show me my driving efficiency trends for the last 3 months"
+- "Analyze my charging costs by location type"
+- "What are my driving usage patterns by day of the week?"
+- "Give me a comprehensive summary for September 2024"
+- "How much am I spending on home charging vs supercharging?"
+
+### Detailed State Information (**New in v0.1.5**)
+- "Show me detailed climate control settings"
+- "What's my current driving state and speed?"
+- "Give me complete vehicle state including doors and windows"
+- "Show me advanced charging state with schedules"
 
 Claude will automatically use the appropriate Tessie tools to get the information you need.
 
