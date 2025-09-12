@@ -155,8 +155,8 @@ class TessieMcpServer {
 
       try {
         if (!this.tessieClient) {
-          // Try environment variable first, then fall back to config
-          const accessToken = process.env.TESSIE_ACCESS_TOKEN || process.env.tessie_api_token;
+          // Try user config from extension, then environment variables
+          const accessToken = process.env.tessie_api_token || process.env.TESSIE_ACCESS_TOKEN;
           if (!accessToken) {
             throw new McpError(
               ErrorCode.InvalidRequest,

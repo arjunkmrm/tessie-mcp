@@ -172,8 +172,8 @@ class TessieMcpServer {
             const { name, arguments: args } = request.params;
             try {
                 if (!this.tessieClient) {
-                    // Try environment variable first, then fall back to config
-                    const accessToken = process.env.TESSIE_ACCESS_TOKEN || process.env.tessie_api_token;
+                    // Try user config from extension, then environment variables
+                    const accessToken = process.env.tessie_api_token || process.env.TESSIE_ACCESS_TOKEN;
                     if (!accessToken) {
                         throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidRequest, 'Tessie API token is required. Please configure it in the extension settings or set TESSIE_ACCESS_TOKEN environment variable.');
                     }
