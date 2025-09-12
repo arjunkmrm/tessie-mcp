@@ -1,0 +1,179 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'  # Triggers on version tags like v0.1.8
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+      
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Fetch full history for changelog
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      
+      - name: Get version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+      
+      - name: Extract version number
+        id: version_number
+        run: echo "VERSION_NUMBER=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+      
+      - name: Verify version in manifest.json matches tag
+        run: |
+          MANIFEST_VERSION=$(node -p "require('./manifest.json').version")
+          if [ "$MANIFEST_VERSION" != "${{ steps.version_number.outputs.VERSION_NUMBER }}" ]; then
+            echo "Error: Version in manifest.json ($MANIFEST_VERSION) does not match tag (${{ steps.version_number.outputs.VERSION_NUMBER }})"
+            exit 1
+          fi
+          echo "✅ Version verification passed: $MANIFEST_VERSION"
+      
+      - name: Create MCPB package
+        run: |
+          # Create temporary directory for packaging
+          mkdir -p temp-mcpb
+          
+          # Copy all necessary files for the MCPB package
+          cp manifest.json temp-mcpb/
+          cp standalone-tessie.js temp-mcpb/
+          cp LICENSE temp-mcpb/
+          cp package.json temp-mcpb/
+          
+          # Create a minimal README for the package
+          echo "# Tessie MCP Extension ${{ steps.version.outputs.VERSION }}" > temp-mcpb/README.md
+          echo "" >> temp-mcpb/README.md
+          echo "Tesla analytics platform through Tessie API with 46+ tools." >> temp-mcpb/README.md
+          echo "" >> temp-mcpb/README.md
+          echo "Install by double-clicking the .mcpb file in Claude Desktop." >> temp-mcpb/README.md
+          
+          # Create icon (you might want to add a proper icon file to the repo)
+          echo '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><rect width="64" height="64" fill="#1a73e8"/><text x="32" y="38" text-anchor="middle" fill="white" font-family="Arial" font-size="20" font-weight="bold">T</text></svg>' > temp-mcpb/icon.svg
+          
+          # Package into MCPB (ZIP format)
+          cd temp-mcpb
+          zip -r ../tessie.mcpb ./*
+          cd ..
+          
+          # Clean up
+          rm -rf temp-mcpb
+          
+          # Verify package was created
+          ls -la tessie.mcpb
+      
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          # Extract the changelog section for this version
+          VERSION_NUMBER="${{ steps.version_number.outputs.VERSION_NUMBER }}"
+          
+          # Find the start and end of this version's changelog section
+          START_LINE=$(grep -n "## \[v$VERSION_NUMBER\]" CHANGELOG.md | cut -d: -f1)
+          if [ -z "$START_LINE" ]; then
+            echo "Warning: No changelog entry found for version $VERSION_NUMBER"
+            echo "CHANGELOG_CONTENT=No changelog entry found for this version." >> $GITHUB_OUTPUT
+          else
+            # Find the next version section or end of file
+            NEXT_LINE=$(tail -n +$((START_LINE + 1)) CHANGELOG.md | grep -n "^## \[v" | head -1 | cut -d: -f1)
+            
+            if [ -z "$NEXT_LINE" ]; then
+              # No next version found, take till end of file
+              CHANGELOG_CONTENT=$(tail -n +$((START_LINE + 1)) CHANGELOG.md)
+            else
+              # Next version found, take content between versions
+              END_LINE=$((START_LINE + NEXT_LINE - 1))
+              CHANGELOG_CONTENT=$(sed -n "$((START_LINE + 1)),$((END_LINE - 1))p" CHANGELOG.md)
+            fi
+            
+            # Save changelog content for release notes
+            echo "CHANGELOG_CONTENT<<EOF" >> $GITHUB_OUTPUT
+            echo "$CHANGELOG_CONTENT" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Create GitHub Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.VERSION }}
+          release_name: "Release ${{ steps.version.outputs.VERSION }}: Tessie MCP Extension"
+          body: |
+            # Tessie MCP Extension ${{ steps.version.outputs.VERSION }}
+            
+            ${{ steps.changelog.outputs.CHANGELOG_CONTENT }}
+            
+            ## Installation
+            
+            1. Download `tessie.mcpb` from the assets below
+            2. Double-click the file to install in Claude Desktop  
+            3. Enable the extension in Claude Desktop settings
+            4. Configure your Tessie API token when prompted
+            
+            ## Requirements
+            
+            - Claude Desktop v0.10.0 or later
+            - Tessie account with API access
+            - Node.js v18.0.0 or later
+            
+            ---
+            
+            🤖 Auto-generated release from GitHub Actions
+          draft: false
+          prerelease: false
+      
+      - name: Upload MCPB Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tessie.mcpb
+          asset_name: tessie.mcpb
+          asset_content_type: application/zip
+      
+      - name: Upload checksums
+        run: |
+          # Generate checksums for the MCPB file
+          sha256sum tessie.mcpb > tessie.mcpb.sha256
+          md5sum tessie.mcpb > tessie.mcpb.md5
+          
+      - name: Upload SHA256 checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tessie.mcpb.sha256
+          asset_name: tessie.mcpb.sha256
+          asset_content_type: text/plain
+      
+      - name: Upload MD5 checksum
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tessie.mcpb.md5
+          asset_name: tessie.mcpb.md5
+          asset_content_type: text/plain
+      
+      - name: Commit updated MCPB to repository
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add tessie.mcpb
+          git commit -m "Auto-update tessie.mcpb for ${{ steps.version.outputs.VERSION }} release" || echo "No changes to commit"
+          git push origin HEAD:main || echo "No changes to push"
