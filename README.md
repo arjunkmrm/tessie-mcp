@@ -1,213 +1,159 @@
-# 🚗 Tessie MCP Extension for Claude Desktop
+# Tessie MCP Extension for Claude Desktop
 
-A Model Context Protocol (MCP) server that connects Claude Desktop to your Tesla vehicle data through the Tessie API. Query your car's location, mileage, driving history, and more using natural language.
+A comprehensive Tesla vehicle data access extension for Claude Desktop through the [Tessie API](https://tessie.com). This extension provides 22+ tools for accessing all aspects of your Tesla vehicle data including battery status, charging information, driving history, location data, weather conditions, and much more.
 
-![Tessie MCP](icon.svg)
+## Features
 
-## ⚡ Quick Install (Recommended)
+- **Complete Tesla Data Access**: All Tessie API GET endpoints for vehicle data
+- **Smart VIN Resolution**: Automatically detects and uses your active vehicle
+- **22+ Tools Available**: Battery, charging, driving, location, weather, tire pressure, consumption, and more
+- **Real-time Data**: Access current vehicle status and historical data
+- **Secure**: API token stored securely in Claude Desktop configuration
 
-### For Claude Desktop Users
-
-1. **Download the Extension**: 
-   - Go to [Releases](../../releases)
-   - Download the latest `tessie.mcpb` file
-
-2. **Install**:
-   - Double-click the `tessie.mcpb` file
-   - Or drag it onto Claude Desktop
-   - Or use File → Open in Claude Desktop
-
-3. **Configure**:
-   - Enter your Tessie API token when prompted
-   - Get your token from [tessie.com](https://tessie.com) → Account → Developer Settings
-
-4. **Start Using**:
-   - Ask Claude: "What vehicles do I have?"
-   - "What's my car's current battery level?"
-   - "How many miles did I drive last week?"
-
-## 🛠️ Manual Installation (Advanced Users)
+## Installation
 
 ### Prerequisites
 
-- Node.js 18+ 
-- A Tessie account with API access
-- Tesla vehicle connected to Tessie
+- [Claude Desktop](https://claude.ai/download) v0.10.0 or later
+- A [Tessie](https://tessie.com) account with API access
+- Your Tessie API token from https://tessie.com
 
-### Setup
+### Install the Extension
 
-1. **Clone and Build**:
-   ```bash
-   git clone https://github.com/your-username/tessie-mcp.git
-   cd tessie-mcp
-   npm install
-   npm run build
-   ```
+1. Download the `tessie.mcpb` file from this repository
+2. Double-click the `.mcpb` file to install it in Claude Desktop
+3. Enable the extension in Claude Desktop settings
+4. Configure your Tessie API token when prompted
 
-2. **Get Tessie API Token**:
-   - Sign up at [tessie.com](https://tessie.com)
-   - Connect your Tesla vehicle
-   - Go to Account → Developer Settings
-   - Generate an API access token
+### Configuration
 
-3. **Configure Claude Desktop**:
-   
-   Edit your Claude Desktop config file:
-   
-   **macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
-   
-   **Windows**: `%APPDATA%/Claude/claude_desktop_config.json`
-   
-   ```json
-   {
-     "mcpServers": {
-       "tessie": {
-         "command": "node",
-         "args": ["/path/to/tessie-mcp/server/index.js"],
-         "env": {
-           "TESSIE_ACCESS_TOKEN": "your-tessie-api-token-here"
-         }
-       }
-     }
-   }
-   ```
+The extension requires your Tessie API token to function. You can get your token from:
+1. Log into your Tessie account at https://tessie.com
+2. Navigate to your API settings
+3. Copy your API token
+4. Enter it in the Claude Desktop extension configuration
 
-4. **Restart Claude Desktop**
-
-## 🎯 What You Can Ask
+## Available Tools
 
 ### Vehicle Information
-- "What vehicles do I have in my Tessie account?"
-- "What's my car's current battery level and location?"
-- "Is my car charging right now?"
-- "What's the current odometer reading?"
+- **get_vehicles**: List all vehicles in your Tessie account
+- **get_vehicle_status**: Get comprehensive vehicle status
+- **get_vehicle_config**: Get vehicle configuration details
+- **get_gui_settings**: Get GUI settings and preferences
+- **get_mobile_enabled**: Check if mobile access is enabled
+- **get_nearby_charging_sites**: Find nearby charging locations
 
-### Location & Mileage Queries  
-- "When I went to Starbucks last week, what was my odometer reading?"
-- "Find all trips to the grocery store this month"
-- "What was my mileage when I visited the airport?"
+### Battery & Charging
+- **get_battery_health**: Get battery health information (global endpoint)
+- **get_charge_state**: Get current charging state and battery level
+- **get_charging_history**: Get historical charging sessions
+- **get_charging_invoices**: Get charging cost invoices
 
-### Driving History & Statistics
-- "How many miles did I drive last week?"
-- "Show me my driving history for the past month"
-- "What was my longest drive this year?"
-- "How much battery did I use on my last trip?"
+### Location & Driving
+- **get_location**: Get current vehicle location
+- **get_driving_history**: Get driving history and trip data  
+- **get_mileage_at_location**: Get mileage data at specific locations
 
-### Time-based Analysis
-- "Calculate my total mileage for December 2024"
-- "Show me daily driving breakdown for this week"
-- "How many trips did I take yesterday?"
+### Climate & Weather
+- **get_climate_state**: Get HVAC and climate control status
+- **get_weather**: Get weather conditions at vehicle location
 
-## 🔧 Available Tools
+### Vehicle Details
+- **get_license_plate**: Get vehicle license plate information
+- **get_tire_pressure**: Get current tire pressure readings
+- **get_consumption**: Get energy consumption since last charge
+- **get_speed_limit**: Get current speed limit information
 
-The extension provides these MCP tools:
+### Alerts & Service
+- **get_latest_alert**: Get the most recent vehicle alert
+- **get_service_data**: Get vehicle service information
 
-| Tool | Description | Parameters |
-|------|-------------|------------|
-| `get_vehicles` | List all vehicles in account | None |
-| `get_vehicle_current_state` | Current vehicle status | `vin`, `use_cache` |
-| `get_driving_history` | Historical driving data | `vin`, `start_date`, `end_date`, `limit` |
-| `get_mileage_at_location` | Find mileage at specific locations | `vin`, `location`, `start_date`, `end_date` |
-| `get_weekly_mileage` | Calculate mileage for time periods | `vin`, `start_date`, `end_date` |
+## Usage Examples
 
-## 🔐 Security & Privacy
+Once installed, you can use the tools in Claude Desktop by asking questions like:
 
-- **Read-Only Access**: Only queries vehicle data, cannot control your car
-- **Secure Storage**: API tokens stored in OS keychain (extension) or environment variables
-- **No Data Storage**: No vehicle data is stored locally or transmitted to third parties
-- **Rate Limiting**: Respects Tessie API rate limits with intelligent caching
+- "What's my Tesla's current battery level?"
+- "Show me my recent driving history"
+- "Where is my car located right now?"
+- "What's the weather like where my Tesla is parked?"
+- "How much did my last charging session cost?"
+- "What's my tire pressure?"
 
-## 📊 Example Responses
+Claude will automatically use the appropriate Tessie tools to get the information you need.
 
-### Current Vehicle State
-```json
-{
-  "vehicle": "Model 3",
-  "vin": "5YJ3E1EA8MF123456",
-  "current_location": {
-    "latitude": 37.4419,
-    "longitude": -122.1430
-  },
-  "odometer": 15234.5,
-  "battery_level": 82,
-  "charging_state": "Disconnected",
-  "locked": true
-}
-```
+## Smart VIN Resolution
 
-### Weekly Mileage Summary
-```json
-{
-  "period": {
-    "start": "2024-01-01",
-    "end": "2024-01-07"
-  },
-  "total_miles_driven": 234.8,
-  "total_drives": 12,
-  "average_miles_per_drive": 19.57,
-  "daily_breakdown": [
-    {"date": "2024-01-01", "miles": 45.2, "drives": 3},
-    {"date": "2024-01-02", "miles": 23.1, "drives": 2}
-  ]
-}
-```
+The extension automatically handles vehicle identification:
 
-## 🚨 Troubleshooting
+- **Single Active Vehicle**: If you have one active Tesla, it's used automatically
+- **Multiple Vehicles**: If you have multiple active vehicles, you'll be prompted to choose
+- **No Active Vehicles**: Clear error messages if no vehicles are available
 
-### Extension Not Loading
-- Ensure you have the latest version of Claude Desktop
-- Check that the `.mcpb` file downloaded completely
-- Try restarting Claude Desktop
+## API Coverage
 
-### "API Token Required" Error
-- Verify your Tessie API token is correct
-- Check that your token has the necessary permissions
-- Ensure your Tesla is connected to Tessie
+This extension implements all GET endpoints under "Vehicle Data" from the official [Tessie API documentation](https://developer.tessie.com/reference/about):
 
-### No Vehicle Data
-- Confirm your Tesla is connected to Tessie
-- Check that your vehicle has recent activity
-- Try waking your vehicle in the Tesla app first
+- All vehicle information endpoints
+- Complete battery and charging data
+- Full location and driving history
+- Climate and weather information
+- Vehicle configuration and settings
+- Service and alert data
+- Tire pressure and consumption metrics
 
-### Rate Limiting
-- The Tessie API has rate limits - the extension will handle this automatically
-- If you get rate limit errors, wait a few minutes before trying again
+## Security
 
-## 🛣️ Roadmap
+- API tokens are stored securely in Claude Desktop's configuration
+- No hardcoded credentials in the extension code
+- All API communication uses HTTPS
+- Tokens are passed via environment variables
 
-- [ ] Support for multiple vehicles with smart selection
-- [ ] Charging session analysis and cost calculations  
-- [ ] Trip categorization (work, personal, etc.)
-- [ ] Integration with calendar events for automatic trip labeling
-- [ ] Energy efficiency analysis and recommendations
-- [ ] Weather correlation with driving patterns
+## Requirements
 
-## 🤝 Contributing
+- **Node.js**: v18.0.0 or later
+- **Claude Desktop**: v0.10.0 or later  
+- **Platforms**: macOS, Windows, Linux
+- **Tessie Account**: Active subscription with API access
 
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/amazing-feature`
-3. Make your changes and test thoroughly
-4. Commit: `git commit -m 'Add amazing feature'`
-5. Push: `git push origin feature/amazing-feature`
-6. Open a Pull Request
+## Troubleshooting
 
-## 📜 License
+### Extension Not Running
+- Check that you've enabled the extension in Claude Desktop settings
+- Verify your Tessie API token is correctly configured
+- Try disabling and re-enabling the extension
 
-MIT License - see [LICENSE](LICENSE) for details.
+### API Errors
+- Ensure your Tessie API token is valid and hasn't expired
+- Check that your Tesla is connected to Tessie
+- Verify your Tesla is awake (some operations require the vehicle to be active)
 
-## 🙏 Acknowledgments
+### No Vehicles Found
+- Make sure your Tesla is linked to your Tessie account
+- Check that the vehicle status shows as "active" in Tessie
+- Try refreshing your vehicle connection in Tessie
 
-- [Tessie](https://tessie.com) for providing excellent Tesla API access
-- [Anthropic](https://anthropic.com) for Claude Desktop and MCP framework
-- Tesla for making amazing vehicles worth tracking!
+## Development
 
-## 📞 Support
+The extension is built as a Node.js MCP (Model Context Protocol) server with:
 
-- 🐛 **Bug Reports**: [GitHub Issues](../../issues)
-- 💡 **Feature Requests**: [GitHub Discussions](../../discussions)
-- 📖 **Documentation**: This README and inline code comments
-- 🔗 **Tessie API Docs**: https://developer.tessie.com
+- **TessieClient**: Handles all API communication with Tessie
+- **TessieMCPServer**: Implements the MCP protocol for Claude Desktop
+- **Smart Error Handling**: Comprehensive error messages and fallbacks
+- **Zero Dependencies**: No external npm packages required
+
+## License
+
+MIT License - see LICENSE file for details.
+
+## Support
+
+For issues with the extension:
+1. Check the troubleshooting section above
+2. Verify your Tessie account and API token
+3. Check Claude Desktop logs for detailed error messages
+
+For Tessie API questions, visit the [official Tessie documentation](https://developer.tessie.com/).
 
 ---
 
-**⚠️ Disclaimer**: This extension is not affiliated with Tesla, Inc. or Tessie. Use at your own risk. Always follow safe driving practices.
+**Note**: This extension requires a Tessie account and active API access. Tessie is a third-party service that provides enhanced Tesla vehicle data access. Visit [tessie.com](https://tessie.com) to learn more.

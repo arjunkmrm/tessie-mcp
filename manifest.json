@@ -1,46 +1,34 @@
 {
-  "manifest_version": "0.1",
+  "dxt_version": "0.1",
   "name": "tessie",
   "display_name": "Tessie",
-  "version": "0.0.1",
-  "description": "Query your Tesla vehicle data through Tessie API - get mileage, location history, driving statistics, and more",
+  "version": "0.1.0",
+  "description": "Comprehensive Tesla vehicle data access through Tessie API - 22+ tools for battery, charging, driving, location, weather, status, and more. All endpoints tested and working.",
   "author": {
     "name": "Keith"
   },
-  "keywords": ["tesla", "tessie", "vehicle", "car", "mileage", "location", "driving"],
+  "keywords": ["tesla", "tessie", "vehicle", "car", "mileage", "location", "driving", "battery", "charging", "weather", "tire-pressure", "consumption"],
   "server": {
     "type": "node",
-    "entry_point": "server/index.js",
+    "entry_point": "standalone-tessie.js",
     "mcp_config": {
       "command": "node",
-      "args": ["${__dirname}/server/index.js"],
+      "args": [
+        "${__dirname}/standalone-tessie.js"
+      ],
       "env": {
         "tessie_api_token": "${user_config.tessie_api_token}"
       }
     }
   },
-  "tools": [
-    {
-      "name": "get_vehicles",
-      "description": "List all vehicles in your Tessie account"
-    },
-    {
-      "name": "get_vehicle_current_state",
-      "description": "Get current vehicle status including battery, location, and odometer"
-    },
-    {
-      "name": "get_driving_history",
-      "description": "Get historical driving data within date ranges"
-    },
-    {
-      "name": "get_mileage_at_location",
-      "description": "Find mileage information for trips to specific locations"
-    },
-    {
-      "name": "get_weekly_mileage",
-      "description": "Calculate total mileage for specific time periods"
+  "tools_generated": true,
+  "compatibility": {
+    "claude_desktop": ">=0.10.0",
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "node": ">=18.0.0"
     }
-  ],
+  },
   "user_config": {
     "tessie_api_token": {
       "type": "string",
