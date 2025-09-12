@@ -1023,6 +1023,1044 @@ class TessieClient {
             }
         };
     }
+
+    // Predictive Analytics Methods
+    async getOptimalChargingStrategy(vin, options = {}) {
+        try {
+            const [drives, charges] = await Promise.all([
+                this.getDrives(vin, { start: options.start, end: options.end, limit: 100 }),
+                this.getCharges(vin, { start: options.start, end: options.end })
+            ]);
+
+            if (!drives.results?.length || !charges.results?.length) {
+                return { error: "Insufficient driving and charging data for strategy analysis" };
+            }
+
+            const strategy = {
+                analysis_period: {
+                    start: options.start || 'Recent data',
+                    end: options.end || 'Present'
+                },
+                current_patterns: {},
+                optimization_recommendations: [],
+                charging_efficiency: {},
+                cost_analysis: {}
+            };
+
+            // Analyze current charging patterns
+            const chargingPatterns = this.analyzeChargingPatterns(charges.results);
+            strategy.current_patterns = chargingPatterns;
+
+            // Analyze driving patterns to predict charging needs
+            const drivingPatterns = this.analyzeDrivingPatternsForCharging(drives.results);
+
+            // Generate optimization recommendations
+            strategy.optimization_recommendations = this.generateChargingRecommendations(
+                chargingPatterns, 
+                drivingPatterns
+            );
+
+            // Calculate efficiency metrics
+            strategy.charging_efficiency = this.calculateChargingEfficiency(charges.results);
+
+            return strategy;
+
+        } catch (error) {
+            return { error: `Charging strategy analysis failed: ${error.message}` };
+        }
+    }
+
+    analyzeChargingPatterns(charges) {
+        const patterns = {
+            preferred_times: { morning: 0, afternoon: 0, evening: 0, night: 0 },
+            location_usage: { home: 0, supercharger: 0, public: 0 },
+            average_session_duration: 0,
+            typical_charge_amounts: [],
+            cost_efficiency: {}
+        };
+
+        let totalDuration = 0;
+
+        charges.forEach(session => {
+            if (session.started_at) {
+                const hour = new Date(session.started_at).getHours();
+                if (hour >= 6 && hour < 12) patterns.preferred_times.morning++;
+                else if (hour >= 12 && hour < 18) patterns.preferred_times.afternoon++;
+                else if (hour >= 18 && hour < 22) patterns.preferred_times.evening++;
+                else patterns.preferred_times.night++;
+            }
+
+            const locationType = this.classifyChargingType(session);
+            if (patterns.location_usage[locationType] !== undefined) {
+                patterns.location_usage[locationType]++;
+            }
+
+            if (session.duration_minutes) {
+                totalDuration += session.duration_minutes;
+            }
+
+            if (session.energy_added_kwh) {
+                patterns.typical_charge_amounts.push(session.energy_added_kwh);
+            }
+        });
+
+        patterns.average_session_duration = totalDuration / charges.length;
+        
+        return patterns;
+    }
+
+    analyzeDrivingPatternsForCharging(drives) {
+        const patterns = {
+            daily_energy_usage: [],
+            peak_usage_days: [],
+            long_trip_frequency: 0,
+            average_daily_miles: 0
+        };
+
+        const dailyUsage = {};
+
+        drives.forEach(drive => {
+            if (drive.started_at && drive.energy_used_kwh) {
+                const date = new Date(drive.started_at).toISOString().split('T')[0];
+                if (!dailyUsage[date]) {
+                    dailyUsage[date] = { energy: 0, miles: 0, trips: 0 };
+                }
+                dailyUsage[date].energy += drive.energy_used_kwh;
+                dailyUsage[date].miles += drive.distance_miles || 0;
+                dailyUsage[date].trips += 1;
+            }
+
+            if (drive.distance_miles > 200) {
+                patterns.long_trip_frequency++;
+            }
+        });
+
+        patterns.daily_energy_usage = Object.values(dailyUsage).map(day => day.energy);
+        patterns.average_daily_miles = Object.values(dailyUsage)
+            .reduce((sum, day) => sum + day.miles, 0) / Object.keys(dailyUsage).length;
+
+        return patterns;
+    }
+
+    generateChargingRecommendations(chargingPatterns, drivingPatterns) {
+        const recommendations = [];
+
+        // Home charging optimization
+        if (chargingPatterns.location_usage.home > 0) {
+            recommendations.push({
+                category: "Home Charging Optimization",
+                recommendation: "Consider charging during off-peak hours (typically late night/early morning)",
+                impact: "Could reduce charging costs by 20-40%",
+                confidence: "High"
+            });
+        }
+
+        // Pre-departure charging
+        if (drivingPatterns.average_daily_miles > 50) {
+            recommendations.push({
+                category: "Pre-departure Strategy", 
+                recommendation: "Schedule charging to complete 1-2 hours before typical departure times",
+                impact: "Optimal battery temperature and full charge availability",
+                confidence: "High"
+            });
+        }
+
+        // Long trip preparation
+        if (drivingPatterns.long_trip_frequency > 0) {
+            recommendations.push({
+                category: "Long Trip Planning",
+                recommendation: "Charge to 100% the night before trips >200 miles",
+                impact: "Reduces supercharging stops and trip anxiety", 
+                confidence: "Medium"
+            });
+        }
+
+        return recommendations;
+    }
+
+    calculateChargingEfficiency(charges) {
+        const efficiency = {
+            cost_per_kwh_by_type: {},
+            time_efficiency: {},
+            overall_metrics: {}
+        };
+
+        const byType = { home: [], supercharger: [], public: [] };
+
+        charges.forEach(session => {
+            const type = this.classifyChargingType(session);
+            if (session.cost && session.energy_added_kwh) {
+                const costPerKwh = session.cost / session.energy_added_kwh;
+                if (byType[type]) byType[type].push(costPerKwh);
+            }
+        });
+
+        // Calculate averages by type
+        Object.keys(byType).forEach(type => {
+            if (byType[type].length > 0) {
+                efficiency.cost_per_kwh_by_type[type] = 
+                    (byType[type].reduce((a, b) => a + b, 0) / byType[type].length).toFixed(3);
+            }
+        });
+
+        return efficiency;
+    }
+
+    async predictMaintenanceNeeds(vin, options = {}) {
+        try {
+            const [vehicle, drives, charges] = await Promise.all([
+                this.getVehicleState(vin),
+                this.getDrives(vin, { limit: 200 }),
+                this.getCharges(vin, { limit: 100 })
+            ]);
+
+            const predictions = {
+                vehicle_info: {
+                    vin: vin,
+                    current_odometer: vehicle?.vehicle_state?.odometer || 0,
+                    analysis_date: new Date().toISOString()
+                },
+                maintenance_predictions: [],
+                usage_analysis: {},
+                recommendations: []
+            };
+
+            const currentMiles = vehicle?.vehicle_state?.odometer || 0;
+
+            // Analyze usage patterns
+            predictions.usage_analysis = this.analyzeVehicleUsagePatterns(drives.results || []);
+
+            // Predict maintenance based on mileage
+            predictions.maintenance_predictions = this.generateMaintenancePredictions(
+                currentMiles, 
+                predictions.usage_analysis
+            );
+
+            // Generate specific recommendations
+            predictions.recommendations = this.generateMaintenanceRecommendations(
+                currentMiles,
+                predictions.usage_analysis,
+                vehicle
+            );
+
+            return predictions;
+
+        } catch (error) {
+            return { error: `Maintenance prediction failed: ${error.message}` };
+        }
+    }
+
+    analyzeVehicleUsagePatterns(drives) {
+        const usage = {
+            average_monthly_miles: 0,
+            driving_intensity: "moderate", // light, moderate, heavy
+            trip_patterns: {
+                short_trips: 0, // <10 miles
+                medium_trips: 0, // 10-50 miles  
+                long_trips: 0 // >50 miles
+            },
+            efficiency_trend: "stable" // improving, stable, declining
+        };
+
+        if (drives.length === 0) return usage;
+
+        let totalMiles = 0;
+        drives.forEach(drive => {
+            if (drive.distance_miles) {
+                totalMiles += drive.distance_miles;
+                
+                if (drive.distance_miles < 10) usage.trip_patterns.short_trips++;
+                else if (drive.distance_miles <= 50) usage.trip_patterns.medium_trips++;
+                else usage.trip_patterns.long_trips++;
+            }
+        });
+
+        // Estimate monthly miles (assuming drives span recent period)
+        const timeSpanDays = Math.max(30, drives.length); // rough estimate
+        usage.average_monthly_miles = Math.round((totalMiles / timeSpanDays) * 30);
+
+        // Determine driving intensity
+        if (usage.average_monthly_miles > 2000) usage.driving_intensity = "heavy";
+        else if (usage.average_monthly_miles < 800) usage.driving_intensity = "light";
+
+        return usage;
+    }
+
+    generateMaintenancePredictions(currentMiles, usageAnalysis) {
+        const predictions = [];
+
+        // Tesla-specific maintenance intervals
+        const maintenanceSchedule = [
+            { item: "Tire Rotation", interval: 6250, type: "miles" },
+            { item: "Cabin Air Filter", interval: 24000, type: "miles" }, 
+            { item: "HEPA Filter", interval: 36000, type: "miles" },
+            { item: "Brake Fluid", interval: 24, type: "months" },
+            { item: "A/C Service", interval: 24, type: "months" },
+            { item: "Tire Replacement", interval: 40000, type: "miles", note: "Varies by usage" }
+        ];
+
+        maintenanceSchedule.forEach(maintenance => {
+            if (maintenance.type === "miles") {
+                const nextService = Math.ceil(currentMiles / maintenance.interval) * maintenance.interval;
+                const milesUntil = nextService - currentMiles;
+                
+                if (milesUntil <= maintenance.interval) {
+                    predictions.push({
+                        item: maintenance.item,
+                        current_miles: currentMiles,
+                        next_service_miles: nextService,
+                        miles_until_service: milesUntil,
+                        estimated_months_until: Math.round(milesUntil / (usageAnalysis.average_monthly_miles || 1000)),
+                        priority: milesUntil < 1000 ? "high" : milesUntil < 3000 ? "medium" : "low",
+                        note: maintenance.note || null
+                    });
+                }
+            }
+        });
+
+        return predictions.sort((a, b) => a.miles_until_service - b.miles_until_service);
+    }
+
+    generateMaintenanceRecommendations(currentMiles, usageAnalysis, vehicle) {
+        const recommendations = [];
+
+        // Tire pressure monitoring
+        if (vehicle?.vehicle_state?.tpms_pressure_fl) {
+            recommendations.push({
+                category: "Tire Health",
+                recommendation: "Monitor tire pressure monthly - current readings available in vehicle state",
+                reason: "Proper pressure extends tire life and improves efficiency",
+                priority: "medium"
+            });
+        }
+
+        // High mileage recommendations
+        if (usageAnalysis.driving_intensity === "heavy") {
+            recommendations.push({
+                category: "Heavy Usage",
+                recommendation: "Consider more frequent inspections due to high mileage usage",
+                reason: `Averaging ${usageAnalysis.average_monthly_miles} miles/month exceeds typical usage`,
+                priority: "medium"
+            });
+        }
+
+        return recommendations;
+    }
+
+    async getPersonalizedInsights(vin, options = {}) {
+        try {
+            const [drives, charges, efficiency, fsdSummary] = await Promise.all([
+                this.getDrives(vin, { start: options.start, end: options.end, limit: 100 }),
+                this.getCharges(vin, { start: options.start, end: options.end }),
+                this.getEfficiencyTrends(vin, options),
+                this.getFSDUsageSummary(vin, options)
+            ]);
+
+            const insights = {
+                analysis_period: {
+                    start: options.start || 'Recent data',
+                    end: options.end || 'Present'
+                },
+                personal_profile: {},
+                key_insights: [],
+                achievements: [],
+                areas_for_improvement: [],
+                unique_patterns: []
+            };
+
+            // Build personal driving profile
+            insights.personal_profile = this.buildDrivingProfile(drives.results || [], charges.results || []);
+
+            // Generate personalized insights
+            insights.key_insights = this.generatePersonalizedInsights(
+                insights.personal_profile,
+                efficiency,
+                fsdSummary
+            );
+
+            // Identify achievements
+            insights.achievements = this.identifyAchievements(insights.personal_profile, efficiency);
+
+            // Suggest improvements
+            insights.areas_for_improvement = this.suggestImprovements(insights.personal_profile);
+
+            return insights;
+
+        } catch (error) {
+            return { error: `Personalized insights generation failed: ${error.message}` };
+        }
+    }
+
+    buildDrivingProfile(drives, charges) {
+        const profile = {
+            driving_style: "balanced", // efficient, balanced, spirited
+            usage_pattern: "commuter", // commuter, road_tripper, city_driver, mixed
+            charging_behavior: "home_focused", // home_focused, mixed, supercharger_heavy
+            efficiency_rating: "average", // excellent, good, average, needs_improvement
+            experience_level: "experienced", // new, intermediate, experienced
+            stats: {
+                total_drives: drives.length,
+                total_charges: charges.length,
+                avg_trip_length: 0,
+                most_common_trip_type: "medium"
+            }
+        };
+
+        // Analyze trip lengths
+        const tripLengths = drives.filter(d => d.distance_miles).map(d => d.distance_miles);
+        if (tripLengths.length > 0) {
+            profile.stats.avg_trip_length = (tripLengths.reduce((a, b) => a + b, 0) / tripLengths.length).toFixed(1);
+        }
+
+        // Determine usage pattern
+        const longTrips = drives.filter(d => d.distance_miles > 100).length;
+        const shortTrips = drives.filter(d => d.distance_miles < 20).length;
+        
+        if (longTrips > drives.length * 0.3) profile.usage_pattern = "road_tripper";
+        else if (shortTrips > drives.length * 0.7) profile.usage_pattern = "city_driver";
+        else profile.usage_pattern = "mixed";
+
+        return profile;
+    }
+
+    generatePersonalizedInsights(profile, efficiency, fsdSummary) {
+        const insights = [];
+
+        // Driving pattern insights
+        insights.push({
+            category: "Driving Patterns",
+            insight: `You're a ${profile.usage_pattern.replace('_', ' ')} with an average trip length of ${profile.stats.avg_trip_length} miles`,
+            details: `Based on ${profile.stats.total_drives} drives analyzed`
+        });
+
+        // FSD usage insights
+        if (fsdSummary?.estimated_fsd_usage?.fsd_percentage > 0) {
+            insights.push({
+                category: "FSD Usage",
+                insight: `Estimated ${fsdSummary.estimated_fsd_usage.fsd_percentage}% of your driving may involve FSD`,
+                details: `Analysis of ${fsdSummary.analyzed_drives} recent drives`
+            });
+        }
+
+        // Efficiency insights
+        if (efficiency?.efficiency_metrics) {
+            insights.push({
+                category: "Efficiency",
+                insight: `Your overall efficiency is ${efficiency.efficiency_metrics.overall_efficiency_kwh_per_mile} kWh/mile`,
+                details: `Based on ${efficiency.total_drives} drives totaling ${efficiency.efficiency_metrics.total_distance_miles} miles`
+            });
+        }
+
+        return insights;
+    }
+
+    identifyAchievements(profile, efficiency) {
+        const achievements = [];
+
+        // High mileage achievement
+        if (profile.stats.total_drives > 100) {
+            achievements.push({
+                title: "Experienced Driver",
+                description: `Completed ${profile.stats.total_drives} drives - you're getting to know your Tesla!`,
+                category: "experience"
+            });
+        }
+
+        // Efficiency achievement
+        if (efficiency?.efficiency_metrics?.overall_efficiency_kwh_per_mile < 0.30) {
+            achievements.push({
+                title: "Efficiency Expert",
+                description: `Excellent efficiency of ${efficiency.efficiency_metrics.overall_efficiency_kwh_per_mile} kWh/mile`,
+                category: "efficiency"
+            });
+        }
+
+        return achievements;
+    }
+
+    suggestImprovements(profile) {
+        const suggestions = [];
+
+        // Generic efficiency suggestions
+        suggestions.push({
+            area: "Charging Optimization",
+            suggestion: "Consider charging during off-peak hours to reduce costs",
+            potential_benefit: "10-30% cost reduction"
+        });
+
+        if (profile.usage_pattern === "city_driver") {
+            suggestions.push({
+                area: "City Driving",
+                suggestion: "Use regenerative braking in city traffic to maximize energy recovery",
+                potential_benefit: "5-10% efficiency improvement"
+            });
+        }
+
+        return suggestions;
+    }
+
+    // Advanced Report Generators
+    async generateAnnualTeslaReport(vin, year) {
+        try {
+            const startDate = new Date(year, 0, 1).toISOString();
+            const endDate = new Date(year, 11, 31, 23, 59, 59).toISOString();
+
+            const [drives, charges, monthlyData, fsdSummary, insights] = await Promise.all([
+                this.getDrives(vin, { start: startDate, end: endDate }),
+                this.getCharges(vin, { start: startDate, end: endDate }),
+                this.getMonthlySummary(vin, year, 12), // December for latest data
+                this.getFSDUsageSummary(vin, { start: startDate, end: endDate }),
+                this.getPersonalizedInsights(vin, { start: startDate, end: endDate })
+            ]);
+
+            const report = {
+                report_info: {
+                    year: year,
+                    vehicle_vin: vin,
+                    generated: new Date().toISOString(),
+                    report_type: "Annual Tesla Summary"
+                },
+                year_in_numbers: {},
+                driving_highlights: {},
+                charging_summary: {},
+                efficiency_analysis: {},
+                fsd_insights: {},
+                achievements: [],
+                memorable_stats: [],
+                monthly_breakdown: {},
+                year_over_year: {} // For future comparison
+            };
+
+            // Calculate year in numbers
+            report.year_in_numbers = this.calculateYearInNumbers(drives.results || [], charges.results || []);
+
+            // Generate driving highlights
+            report.driving_highlights = this.generateDrivingHighlights(drives.results || []);
+
+            // Charging summary
+            report.charging_summary = this.generateChargingSummary(charges.results || []);
+
+            // FSD insights (if available)
+            if (fsdSummary && !fsdSummary.error) {
+                report.fsd_insights = {
+                    estimated_fsd_percentage: fsdSummary.estimated_fsd_usage?.fsd_percentage || 0,
+                    total_fsd_miles: fsdSummary.estimated_fsd_usage?.total_fsd_miles || 0,
+                    confidence_note: "FSD estimates are experimental and for analysis only"
+                };
+            }
+
+            // Memorable stats
+            report.memorable_stats = this.generateMemorableStats(
+                drives.results || [],
+                charges.results || [],
+                report.year_in_numbers
+            );
+
+            return report;
+
+        } catch (error) {
+            return { error: `Annual report generation failed: ${error.message}` };
+        }
+    }
+
+    calculateYearInNumbers(drives, charges) {
+        const numbers = {
+            total_miles_driven: 0,
+            total_drives: drives.length,
+            total_charging_sessions: charges.length,
+            total_energy_used: 0,
+            total_energy_added: 0,
+            total_charging_cost: 0,
+            longest_drive: 0,
+            most_efficient_drive: null,
+            days_driven: new Set()
+        };
+
+        drives.forEach(drive => {
+            if (drive.distance_miles) {
+                numbers.total_miles_driven += drive.distance_miles;
+                numbers.longest_drive = Math.max(numbers.longest_drive, drive.distance_miles);
+            }
+            
+            if (drive.energy_used_kwh) {
+                numbers.total_energy_used += drive.energy_used_kwh;
+                
+                // Track most efficient drive
+                if (drive.distance_miles && drive.energy_used_kwh) {
+                    const efficiency = drive.energy_used_kwh / drive.distance_miles;
+                    if (!numbers.most_efficient_drive || efficiency < numbers.most_efficient_drive.efficiency) {
+                        numbers.most_efficient_drive = {
+                            efficiency: efficiency.toFixed(3),
+                            distance: drive.distance_miles,
+                            date: drive.started_at
+                        };
+                    }
+                }
+            }
+
+            if (drive.started_at) {
+                numbers.days_driven.add(new Date(drive.started_at).toDateString());
+            }
+        });
+
+        charges.forEach(charge => {
+            if (charge.energy_added_kwh) numbers.total_energy_added += charge.energy_added_kwh;
+            if (charge.cost) numbers.total_charging_cost += charge.cost;
+        });
+
+        // Convert Set to count
+        numbers.days_driven = numbers.days_driven.size;
+
+        // Round numbers
+        numbers.total_miles_driven = Math.round(numbers.total_miles_driven);
+        numbers.total_energy_used = Math.round(numbers.total_energy_used);
+        numbers.total_energy_added = Math.round(numbers.total_energy_added);
+        numbers.total_charging_cost = Math.round(numbers.total_charging_cost * 100) / 100;
+
+        return numbers;
+    }
+
+    generateDrivingHighlights(drives) {
+        const highlights = {
+            favorite_driving_day: null,
+            busiest_month: null,
+            most_adventurous_trip: null,
+            consistency_score: 0
+        };
+
+        if (drives.length === 0) return highlights;
+
+        // Find favorite driving day (day of week with most drives)
+        const dayCount = {};
+        const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        
+        drives.forEach(drive => {
+            if (drive.started_at) {
+                const day = new Date(drive.started_at).getDay();
+                dayCount[day] = (dayCount[day] || 0) + 1;
+            }
+        });
+
+        const favDay = Object.entries(dayCount).sort(([,a], [,b]) => b - a)[0];
+        if (favDay) {
+            highlights.favorite_driving_day = {
+                day: dayNames[parseInt(favDay[0])],
+                drive_count: favDay[1]
+            };
+        }
+
+        // Find most adventurous trip (longest distance)
+        const longestTrip = drives.reduce((max, drive) => {
+            return (drive.distance_miles || 0) > (max?.distance_miles || 0) ? drive : max;
+        }, null);
+
+        if (longestTrip) {
+            highlights.most_adventurous_trip = {
+                distance_miles: longestTrip.distance_miles,
+                date: longestTrip.started_at,
+                duration_hours: longestTrip.duration_minutes ? (longestTrip.duration_minutes / 60).toFixed(1) : null
+            };
+        }
+
+        return highlights;
+    }
+
+    generateChargingSummary(charges) {
+        const summary = {
+            home_charges: 0,
+            supercharger_sessions: 0,
+            public_charges: 0,
+            most_expensive_session: null,
+            fastest_charging_day: null,
+            total_charging_time_hours: 0
+        };
+
+        let maxCost = 0;
+        let totalMinutes = 0;
+
+        charges.forEach(charge => {
+            const type = this.classifyChargingType(charge);
+            if (type === 'home') summary.home_charges++;
+            else if (type === 'supercharger') summary.supercharger_sessions++;
+            else summary.public_charges++;
+
+            if (charge.cost && charge.cost > maxCost) {
+                maxCost = charge.cost;
+                summary.most_expensive_session = {
+                    cost: charge.cost,
+                    date: charge.started_at,
+                    location: charge.location || 'Unknown'
+                };
+            }
+
+            if (charge.duration_minutes) {
+                totalMinutes += charge.duration_minutes;
+            }
+        });
+
+        summary.total_charging_time_hours = Math.round(totalMinutes / 60);
+
+        return summary;
+    }
+
+    generateMemorableStats(drives, charges, yearNumbers) {
+        const stats = [];
+
+        // Environmental impact
+        const gasCarMPG = 25; // Average gas car efficiency
+        const gasGallonsSaved = yearNumbers.total_miles_driven / gasCarMPG;
+        stats.push({
+            stat: `${Math.round(gasGallonsSaved)} gallons of gas saved`,
+            description: "Compared to an average gas car",
+            category: "environmental"
+        });
+
+        // Time spent charging vs gas stations
+        const avgGasStopMinutes = 5;
+        const gasStopsAvoided = Math.floor(yearNumbers.total_miles_driven / 300); // ~300 miles per tank
+        const timeAtGasStations = gasStopsAvoided * avgGasStopMinutes;
+        
+        stats.push({
+            stat: `${timeAtGasStations} minutes not spent at gas stations`,
+            description: "Time saved by not filling up gas",
+            category: "convenience"
+        });
+
+        // Unique driving achievement
+        if (yearNumbers.longest_drive > 200) {
+            stats.push({
+                stat: `${yearNumbers.longest_drive} mile adventure`,
+                description: "Your longest single drive this year",
+                category: "achievement"
+            });
+        }
+
+        return stats;
+    }
+
+    async predictMonthlyCosts(vin, options = {}) {
+        try {
+            const charges = await this.getCharges(vin, { start: options.start, end: options.end });
+            
+            if (!charges.results?.length) {
+                return { error: "Insufficient charging data for cost prediction" };
+            }
+
+            const prediction = {
+                analysis_period: {
+                    start: options.start || 'Recent data',
+                    end: options.end || 'Present'
+                },
+                historical_average: 0,
+                predicted_next_month: 0,
+                cost_breakdown: {
+                    home_charging: 0,
+                    supercharging: 0,
+                    public_charging: 0
+                },
+                factors_affecting_prediction: [],
+                confidence_level: "medium"
+            };
+
+            // Calculate historical monthly average
+            const monthlyCosts = this.calculateMonthlyCosts(charges.results);
+            prediction.historical_average = monthlyCosts.average;
+            prediction.cost_breakdown = monthlyCosts.breakdown;
+
+            // Generate prediction (simple trend-based for now)
+            prediction.predicted_next_month = Math.round(monthlyCosts.trend_adjusted * 100) / 100;
+
+            // Identify factors
+            prediction.factors_affecting_prediction = this.identifyCostFactors(charges.results);
+
+            return prediction;
+
+        } catch (error) {
+            return { error: `Cost prediction failed: ${error.message}` };
+        }
+    }
+
+    calculateMonthlyCosts(charges) {
+        const monthlyTotals = {};
+        const breakdown = { home_charging: 0, supercharging: 0, public_charging: 0 };
+
+        charges.forEach(charge => {
+            if (charge.started_at && charge.cost) {
+                const monthKey = new Date(charge.started_at).toISOString().substring(0, 7); // YYYY-MM
+                monthlyTotals[monthKey] = (monthlyTotals[monthKey] || 0) + charge.cost;
+
+                const type = this.classifyChargingType(charge);
+                if (type === 'home') breakdown.home_charging += charge.cost;
+                else if (type === 'supercharger') breakdown.supercharging += charge.cost;
+                else breakdown.public_charging += charge.cost;
+            }
+        });
+
+        const monthlyCostArray = Object.values(monthlyTotals);
+        const average = monthlyCostArray.length > 0 ? 
+            monthlyCostArray.reduce((a, b) => a + b, 0) / monthlyCostArray.length : 0;
+
+        // Simple trend adjustment (last month vs average)
+        const lastMonthCost = monthlyCostArray[monthlyCostArray.length - 1] || average;
+        const trend_adjusted = (average * 0.7) + (lastMonthCost * 0.3); // Weighted average
+
+        return {
+            average: Math.round(average * 100) / 100,
+            trend_adjusted: trend_adjusted,
+            breakdown: {
+                home_charging: Math.round(breakdown.home_charging * 100) / 100,
+                supercharging: Math.round(breakdown.supercharging * 100) / 100,
+                public_charging: Math.round(breakdown.public_charging * 100) / 100
+            }
+        };
+    }
+
+    identifyCostFactors(charges) {
+        const factors = [];
+
+        // Seasonal patterns (basic)
+        const recentCharges = charges.slice(-10);
+        const oldCharges = charges.slice(0, Math.min(10, charges.length - 10));
+
+        const recentAvgCost = recentCharges.length > 0 ? 
+            recentCharges.reduce((sum, c) => sum + (c.cost || 0), 0) / recentCharges.length : 0;
+        const oldAvgCost = oldCharges.length > 0 ? 
+            oldCharges.reduce((sum, c) => sum + (c.cost || 0), 0) / oldCharges.length : 0;
+
+        if (recentAvgCost > oldAvgCost * 1.1) {
+            factors.push("Recent charging sessions are more expensive than historical average");
+        }
+
+        const superchargerSessions = charges.filter(c => this.classifyChargingType(c) === 'supercharger').length;
+        if (superchargerSessions > charges.length * 0.3) {
+            factors.push("High supercharger usage increases costs");
+        }
+
+        return factors;
+    }
+
+    // Pattern Recognition Methods
+    async detectUsageAnomalies(vin, options = {}) {
+        try {
+            const drives = await this.getDrives(vin, { start: options.start, end: options.end, limit: 100 });
+            
+            if (!drives.results?.length) {
+                return { error: "Insufficient driving data for anomaly detection" };
+            }
+
+            const anomalies = {
+                analysis_period: {
+                    start: options.start || 'Recent data',
+                    end: options.end || 'Present'
+                },
+                detected_anomalies: [],
+                pattern_analysis: {},
+                recommendations: []
+            };
+
+            // Analyze patterns and detect anomalies
+            anomalies.pattern_analysis = this.analyzeUsagePatterns(drives.results);
+            anomalies.detected_anomalies = this.identifyAnomalies(drives.results, anomalies.pattern_analysis);
+            anomalies.recommendations = this.generateAnomalyRecommendations(anomalies.detected_anomalies);
+
+            return anomalies;
+
+        } catch (error) {
+            return { error: `Anomaly detection failed: ${error.message}` };
+        }
+    }
+
+    analyzeUsagePatterns(drives) {
+        const patterns = {
+            average_trip_distance: 0,
+            average_energy_usage: 0,
+            typical_efficiency_range: { min: 0, max: 0 },
+            common_drive_times: { morning: 0, afternoon: 0, evening: 0, night: 0 },
+            baseline_established: false
+        };
+
+        if (drives.length < 10) {
+            return patterns; // Need more data for reliable patterns
+        }
+
+        // Calculate averages
+        const distances = drives.filter(d => d.distance_miles).map(d => d.distance_miles);
+        const energyUsages = drives.filter(d => d.energy_used_kwh).map(d => d.energy_used_kwh);
+        
+        patterns.average_trip_distance = distances.reduce((a, b) => a + b, 0) / distances.length;
+        patterns.average_energy_usage = energyUsages.reduce((a, b) => a + b, 0) / energyUsages.length;
+
+        // Calculate efficiency ranges
+        const efficiencies = drives
+            .filter(d => d.distance_miles && d.energy_used_kwh)
+            .map(d => d.energy_used_kwh / d.distance_miles)
+            .sort((a, b) => a - b);
+
+        if (efficiencies.length > 0) {
+            patterns.typical_efficiency_range.min = efficiencies[Math.floor(efficiencies.length * 0.25)];
+            patterns.typical_efficiency_range.max = efficiencies[Math.floor(efficiencies.length * 0.75)];
+        }
+
+        patterns.baseline_established = true;
+        return patterns;
+    }
+
+    identifyAnomalies(drives, patterns) {
+        const anomalies = [];
+
+        if (!patterns.baseline_established) {
+            return anomalies;
+        }
+
+        drives.forEach(drive => {
+            // Distance anomalies
+            if (drive.distance_miles && drive.distance_miles > patterns.average_trip_distance * 3) {
+                anomalies.push({
+                    type: "unusually_long_trip",
+                    date: drive.started_at,
+                    value: drive.distance_miles,
+                    expected_range: `~${patterns.average_trip_distance.toFixed(1)} miles`,
+                    severity: "medium"
+                });
+            }
+
+            // Efficiency anomalies
+            if (drive.distance_miles && drive.energy_used_kwh) {
+                const efficiency = drive.energy_used_kwh / drive.distance_miles;
+                if (efficiency > patterns.typical_efficiency_range.max * 1.5) {
+                    anomalies.push({
+                        type: "poor_efficiency",
+                        date: drive.started_at,
+                        value: `${efficiency.toFixed(3)} kWh/mile`,
+                        expected_range: `${patterns.typical_efficiency_range.min.toFixed(3)}-${patterns.typical_efficiency_range.max.toFixed(3)} kWh/mile`,
+                        severity: "medium"
+                    });
+                }
+            }
+        });
+
+        return anomalies;
+    }
+
+    generateAnomalyRecommendations(anomalies) {
+        const recommendations = [];
+
+        const efficiencyAnomalies = anomalies.filter(a => a.type === 'poor_efficiency');
+        if (efficiencyAnomalies.length > 0) {
+            recommendations.push({
+                issue: "Efficiency concerns detected",
+                recommendation: "Check tire pressure, driving conditions, and climate control usage",
+                affected_drives: efficiencyAnomalies.length
+            });
+        }
+
+        return recommendations;
+    }
+
+    async analyzeSeasonalBehavior(vin, options = {}) {
+        try {
+            const drives = await this.getDrives(vin, { start: options.start, end: options.end, limit: 200 });
+            
+            if (!drives.results?.length) {
+                return { error: "Insufficient data for seasonal analysis" };
+            }
+
+            const analysis = {
+                analysis_period: {
+                    start: options.start || 'Available data',
+                    end: options.end || 'Present'
+                },
+                seasonal_patterns: {},
+                weather_impact: {},
+                efficiency_by_season: {},
+                recommendations: []
+            };
+
+            // Group data by season
+            const seasonalData = this.groupDrivesBySeason(drives.results);
+            
+            // Analyze each season
+            analysis.seasonal_patterns = this.analyzeSeasonalPatterns(seasonalData);
+            analysis.efficiency_by_season = this.calculateSeasonalEfficiency(seasonalData);
+            analysis.recommendations = this.generateSeasonalRecommendations(analysis.efficiency_by_season);
+
+            return analysis;
+
+        } catch (error) {
+            return { error: `Seasonal analysis failed: ${error.message}` };
+        }
+    }
+
+    groupDrivesBySeason(drives) {
+        const seasonal = { winter: [], spring: [], summer: [], fall: [] };
+
+        drives.forEach(drive => {
+            if (drive.started_at) {
+                const month = new Date(drive.started_at).getMonth();
+                if (month >= 11 || month <= 1) seasonal.winter.push(drive);
+                else if (month >= 2 && month <= 4) seasonal.spring.push(drive);
+                else if (month >= 5 && month <= 7) seasonal.summer.push(drive);
+                else seasonal.fall.push(drive);
+            }
+        });
+
+        return seasonal;
+    }
+
+    analyzeSeasonalPatterns(seasonalData) {
+        const patterns = {};
+
+        Object.entries(seasonalData).forEach(([season, drives]) => {
+            if (drives.length > 0) {
+                patterns[season] = {
+                    total_drives: drives.length,
+                    avg_distance: drives.reduce((sum, d) => sum + (d.distance_miles || 0), 0) / drives.length,
+                    avg_energy_usage: drives.reduce((sum, d) => sum + (d.energy_used_kwh || 0), 0) / drives.length
+                };
+            }
+        });
+
+        return patterns;
+    }
+
+    calculateSeasonalEfficiency(seasonalData) {
+        const efficiency = {};
+
+        Object.entries(seasonalData).forEach(([season, drives]) => {
+            const efficiencyData = drives
+                .filter(d => d.distance_miles && d.energy_used_kwh)
+                .map(d => d.energy_used_kwh / d.distance_miles);
+
+            if (efficiencyData.length > 0) {
+                efficiency[season] = {
+                    avg_efficiency: efficiencyData.reduce((a, b) => a + b, 0) / efficiencyData.length,
+                    sample_size: efficiencyData.length
+                };
+            }
+        });
+
+        return efficiency;
+    }
+
+    generateSeasonalRecommendations(efficiency) {
+        const recommendations = [];
+
+        // Compare winter vs summer efficiency
+        if (efficiency.winter && efficiency.summer) {
+            const winterEff = efficiency.winter.avg_efficiency;
+            const summerEff = efficiency.summer.avg_efficiency;
+            
+            if (winterEff > summerEff * 1.2) {
+                recommendations.push({
+                    season: "winter",
+                    recommendation: "Winter efficiency is significantly lower - consider preconditioning and moderate climate control use",
+                    impact: `${((winterEff - summerEff) / summerEff * 100).toFixed(1)}% higher energy usage vs summer`
+                });
+            }
+        }
+
+        return recommendations;
+    }
 }
 
 // MCP Server implementation
@@ -1534,6 +2572,87 @@ class TessieMCPServer {
                                     vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
                                     start: { type: "string", description: "Start date in ISO format" },
                                     end: { type: "string", description: "End date in ISO format" }
+                                }
+                            }
+                        },
+                        
+                        // Predictive Analytics Tools
+                        {
+                            name: "get_optimal_charging_strategy",
+                            description: "Analyze charging patterns and provide personalized optimization recommendations",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" }
+                                }
+                            }
+                        },
+                        {
+                            name: "predict_maintenance_needs",
+                            description: "Predict upcoming maintenance needs based on Tesla service intervals and current mileage",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" }
+                                }
+                            }
+                        },
+                        {
+                            name: "get_personalized_insights",
+                            description: "Generate personalized driving insights and recommendations based on usage patterns",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" }
+                                }
+                            }
+                        },
+                        
+                        // Advanced Report Generators
+                        {
+                            name: "generate_annual_tesla_report",
+                            description: "Create comprehensive year-in-review report with achievements, milestones, and insights",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    year: { type: "number", description: "Report year (e.g. 2024)" }
+                                }
+                            }
+                        },
+                        {
+                            name: "predict_monthly_costs",
+                            description: "Forecast charging costs and energy usage for upcoming months based on historical trends",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    months_ahead: { type: "number", description: "Number of months to forecast (1-12)" }
+                                }
+                            }
+                        },
+                        
+                        // Pattern Recognition Tools
+                        {
+                            name: "detect_usage_anomalies",
+                            description: "Identify unusual driving patterns and potential issues in vehicle usage",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    start: { type: "string", description: "Start date in ISO format" },
+                                    end: { type: "string", description: "End date in ISO format" }
+                                }
+                            }
+                        },
+                        {
+                            name: "analyze_seasonal_behavior",
+                            description: "Analyze how driving efficiency and patterns change across seasons (winter vs summer impact)",
+                            inputSchema: {
+                                type: "object",
+                                properties: {
+                                    vin: { type: "string", description: "Vehicle VIN (leave empty to use active vehicle)" },
+                                    year: { type: "number", description: "Year to analyze (e.g. 2024)" }
                                 }
                             }
                         }
@@ -2053,6 +3172,77 @@ class TessieMCPServer {
                     
                     result = await this.tessieClient.exportFSDDetectionReport(vinEFDR, exportFSDOptions);
                     this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    break;
+
+                // Predictive Analytics Handlers
+                case 'get_optimal_charging_strategy':
+                    const vinOCS = args.vin || await this.getFirstVehicleVin();
+                    if (!vinOCS) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    result = await this.tessieClient.getOptimalChargingStrategy(vinOCS);
+                    break;
+
+                case 'predict_maintenance_needs':
+                    const vinPMN = args.vin || await this.getFirstVehicleVin();
+                    if (!vinPMN) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    result = await this.tessieClient.predictMaintenanceNeeds(vinPMN);
+                    break;
+
+                case 'get_personalized_insights':
+                    const vinGPI = args.vin || await this.getFirstVehicleVin();
+                    if (!vinGPI) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    result = await this.tessieClient.getPersonalizedInsights(vinGPI);
+                    break;
+
+                // Advanced Report Generator Handlers
+                case 'generate_annual_tesla_report':
+                    const vinGATR = args.vin || await this.getFirstVehicleVin();
+                    if (!vinGATR) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    result = await this.tessieClient.generateAnnualTeslaReport(vinGATR, args.year || 2024);
+                    break;
+
+                case 'predict_monthly_costs':
+                    const vinPMC = args.vin || await this.getFirstVehicleVin();
+                    if (!vinPMC) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    result = await this.tessieClient.predictMonthlyCosts(vinPMC, args.months_ahead || 3);
+                    break;
+
+                // Pattern Recognition Handlers
+                case 'detect_usage_anomalies':
+                    const vinDUA = args.vin || await this.getFirstVehicleVin();
+                    if (!vinDUA) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    
+                    const anomalyOptions = {};
+                    if (args.start) anomalyOptions.start = args.start;
+                    if (args.end) anomalyOptions.end = args.end;
+                    
+                    result = await this.tessieClient.detectUsageAnomalies(vinDUA, anomalyOptions);
+                    break;
+
+                case 'analyze_seasonal_behavior':
+                    const vinASB = args.vin || await this.getFirstVehicleVin();
+                    if (!vinASB) {
+                        this.sendError(message.id, -32000, this.getMultipleVehicleErrorMessage());
+                        return;
+                    }
+                    result = await this.tessieClient.analyzeSeasonalBehavior(vinASB, args.year || 2024);
                     break;
 
                 default:

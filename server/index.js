@@ -60,6 +60,14 @@ class TessieMcpServer {
             await this.server.close();
             process.exit(0);
         });
+        process.on('uncaughtException', (error) => {
+            console.error('[Uncaught Exception]', error);
+            process.exit(1);
+        });
+        process.on('unhandledRejection', (reason, promise) => {
+            console.error('[Unhandled Rejection]', reason, 'at', promise);
+            process.exit(1);
+        });
     }
     setupToolHandlers() {
         this.server.setRequestHandler(types_js_1.ListToolsRequestSchema, async () => ({
@@ -351,6 +359,23 @@ class TessieMcpServer {
         }));
     }
     async run() {
+        console.error('Starting Tessie MCP server...');
+        console.error('Environment variables available:', {
+            tessie_api_token: process.env.tessie_api_token ? '[SET]' : '[NOT SET]',
+            TESSIE_ACCESS_TOKEN: process.env.TESSIE_ACCESS_TOKEN ? '[SET]' : '[NOT SET]'
+        });
+        
+        // Check if we have any token available
+        const accessToken = process.env.tessie_api_token || process.env.TESSIE_ACCESS_TOKEN;
+        if (!accessToken) {
+            console.error('ERROR: No Tessie API token found in environment variables!');
+            console.error('Please make sure to configure tessie_api_token in the extension settings');
+            console.error('or set TESSIE_ACCESS_TOKEN environment variable');
+            // Don't exit - let the server run but tools will fail with meaningful errors
+        } else {
+            console.error('Tessie API token found - server ready');
+        }
+        
         const transport = new stdio_js_1.StdioServerTransport();
         await this.server.connect(transport);
         console.error('Tessie MCP server running on stdio');
