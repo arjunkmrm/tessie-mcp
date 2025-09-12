@@ -12,9 +12,109 @@ class TessieClient {
     constructor(accessToken) {
         this.accessToken = accessToken;
         this.baseUrl = 'https://api.tessie.com';
+        // Token optimization: aggressive caching and response compression
+        this.cache = new Map();
+        this.cacheTimeout = 60000; // 1 minute for dynamic data
+        this.longCacheTimeout = 300000; // 5 minutes for static data
+        this.maxCacheSize = 100;
+    }
+
+    // Intelligent caching with TTL and size limits
+    getCacheKey(endpoint, params = {}) {
+        return `${endpoint}_${JSON.stringify(params)}`;
+    }
+
+    setCache(key, data, ttl = this.cacheTimeout) {
+        // Prevent cache bloat
+        if (this.cache.size >= this.maxCacheSize) {
+            const firstKey = this.cache.keys().next().value;
+            this.cache.delete(firstKey);
+        }
+        
+        this.cache.set(key, {
+            data,
+            expires: Date.now() + ttl
+        });
+    }
+
+    getCache(key) {
+        const cached = this.cache.get(key);
+        if (!cached || Date.now() > cached.expires) {
+            this.cache.delete(key);
+            return null;
+        }
+        return cached.data;
+    }
+
+    // Ultra-compact JSON formatter - removes all unnecessary data and whitespace
+    compactJson(obj, maxDepth = 3) {
+        const seen = new WeakSet();
+        
+        const compress = (item, depth = 0) => {
+            if (depth > maxDepth || item === null) return item;
+            
+            if (typeof item === 'object') {
+                if (seen.has(item)) return '[Circular]';
+                seen.add(item);
+                
+                if (Array.isArray(item)) {
+                    return item.slice(0, 20).map(i => compress(i, depth + 1)); // Limit arrays to 20 items
+                }
+                
+                const compressed = {};
+                const keys = Object.keys(item);
+                
+                // Remove common useless fields that waste tokens
+                const skipFields = new Set(['id', 'vin', 'created_at', 'updated_at', 'raw', 'meta', 'debug']);
+                
+                for (const key of keys.slice(0, 15)) { // Limit object keys to 15
+                    if (!skipFields.has(key) && item[key] !== null && item[key] !== undefined && item[key] !== '') {
+                        compressed[key] = compress(item[key], depth + 1);
+                    }
+                }
+                return compressed;
+            }
+            
+            // Compress numbers and strings
+            if (typeof item === 'number') {
+                return Math.round(item * 100) / 100; // 2 decimal places max
+            }
+            
+            if (typeof item === 'string' && item.length > 50) {
+                return item.substring(0, 47) + '...';
+            }
+            
+            return item;
+        };
+        
+        return JSON.stringify(compress(obj)); // NO WHITESPACE - minified
+    }
+
+    // Response size validator - prevents token bloat
+    validateResponseSize(response) {
+        const jsonStr = typeof response === 'string' ? response : JSON.stringify(response);
+        const maxSize = 8000; // ~2K tokens max
+        
+        if (jsonStr.length > maxSize) {
+            console.warn(`Response truncated: ${jsonStr.length} chars -> ${maxSize} chars`);
+            try {
+                const obj = typeof response === 'string' ? JSON.parse(response) : response;
+                return this.compactJson(obj, 2); // More aggressive compression
+            } catch (e) {
+                return jsonStr.substring(0, maxSize - 20) + '...[truncated]';
+            }
+        }
+        return jsonStr;
     }
 
     async makeRequest(endpoint, options = {}) {
+        // Check cache for GET requests (huge token savings)
+        if (!options.method || options.method === 'GET') {
+            const cacheKey = this.getCacheKey(endpoint, options.params);
+            const cached = this.getCache(cacheKey);
+            if (cached) return cached;
+        }
+
         const url = new URL(endpoint, this.baseUrl);
         const isHttps = url.protocol === 'https:';
         const client = isHttps ? https : http;
@@ -40,6 +140,12 @@ class TessieClient {
                     try {
                         const jsonData = JSON.parse(data);
                         if (res.statusCode >= 200 && res.statusCode < 300) {
+                            // Cache successful GET responses
+                            if (!options.method || options.method === 'GET') {
+                                const cacheKey = this.getCacheKey(endpoint, options.params);
+                                const ttl = this.getCacheTTL(endpoint);
+                                this.setCache(cacheKey, jsonData, ttl);
+                            }
                             resolve(jsonData);
                         } else {
                             reject(new Error(`API Error ${res.statusCode}: ${jsonData.error || data}`));
@@ -64,6 +170,23 @@ class TessieClient {
         });
     }
 
+    // Smart cache TTL based on data volatility
+    getCacheTTL(endpoint) {
+        // Static data - cache longer
+        if (endpoint.includes('/vehicles') && !endpoint.includes('/state')) {
+            return this.longCacheTimeout; // 5 minutes
+        }
+        // Location, status - cache shorter  
+        if (endpoint.includes('/location') || endpoint.includes('/state')) {
+            return 30000; // 30 seconds
+        }
+        // Historical data - cache longer
+        if (endpoint.includes('/drives') || endpoint.includes('/charges')) {
+            return this.longCacheTimeout;
+        }
+        return this.cacheTimeout; // Default 1 minute
+    }
+
     async getVehicles() {
         return this.makeRequest('/vehicles');
     }
@@ -76,7 +199,9 @@ class TessieClient {
         const params = new URLSearchParams();
         if (options.start) params.append('start', options.start);
         if (options.end) params.append('end', options.end);
-        if (options.limit) params.append('limit', options.limit.toString());
+        // AGGRESSIVE TOKEN OPTIMIZATION: Default to very small limits
+        const limit = Math.min(options.limit || 25, 50); // Max 50, default 25
+        params.append('limit', limit.toString());
         
         const queryString = params.toString();
         const endpoint = `/${vin}/drives${queryString ? '?' + queryString : ''}`;
@@ -158,7 +283,9 @@ class TessieClient {
         const params = new URLSearchParams();
         if (options.start) params.append('start', options.start);
         if (options.end) params.append('end', options.end);
-        if (options.limit) params.append('limit', options.limit.toString());
+        // TOKEN OPTIMIZATION: Limit charges data
+        const limit = Math.min(options.limit || 20, 30); // Max 30, default 20
+        params.append('limit', limit.toString());
         
         const queryString = params.toString();
         const endpoint = `/${vin}/charges${queryString ? '?' + queryString : ''}`;
@@ -236,53 +363,32 @@ class TessieClient {
             return { error: "No drive data available for efficiency analysis" };
         }
 
-        const driveData = drives.results;
-        const trends = {
-            period: {
-                start: options.start || 'All time',
-                end: options.end || 'Present'
-            },
-            total_drives: driveData.length,
-            efficiency_metrics: {}
-        };
+        // ULTRA-COMPACT TOKEN-OPTIMIZED EFFICIENCY ANALYSIS
+        let dist = 0, energy = 0, dailyData = new Map();
 
-        // Calculate efficiency trends
-        let totalDistance = 0;
-        let totalEnergyUsed = 0;
-        let dailyEfficiency = {};
-
-        driveData.forEach(drive => {
-            if (drive.distance_miles && drive.energy_used_kwh) {
-                totalDistance += drive.distance_miles;
-                totalEnergyUsed += drive.energy_used_kwh;
-                
-                const date = new Date(drive.started_at).toISOString().split('T')[0];
-                if (!dailyEfficiency[date]) {
-                    dailyEfficiency[date] = { distance: 0, energy: 0, drives: 0 };
-                }
-                dailyEfficiency[date].distance += drive.distance_miles;
-                dailyEfficiency[date].energy += drive.energy_used_kwh;
-                dailyEfficiency[date].drives += 1;
+        drives.results.slice(0, 30).forEach(d => { // Limit to 30 drives
+            const mi = d.distance_miles || 0;
+            const kw = d.energy_used_kwh || 0;
+            if (mi > 0 && kw > 0) {
+                dist += mi; energy += kw;
+                const day = new Date(d.started_at).toISOString().slice(5, 10); // MM-DD format
+                const existing = dailyData.get(day) || [0, 0];
+                dailyData.set(day, [existing[0] + mi, existing[1] + kw]);
             }
         });
 
-        if (totalDistance > 0 && totalEnergyUsed > 0) {
-            trends.efficiency_metrics = {
-                overall_efficiency_kwh_per_mile: (totalEnergyUsed / totalDistance).toFixed(3),
-                overall_efficiency_miles_per_kwh: (totalDistance / totalEnergyUsed).toFixed(3),
-                total_distance_miles: totalDistance.toFixed(1),
-                total_energy_used_kwh: totalEnergyUsed.toFixed(1),
-                daily_breakdown: Object.entries(dailyEfficiency).map(([date, data]) => ({
-                    date,
-                    efficiency_kwh_per_mile: data.distance > 0 ? (data.energy / data.distance).toFixed(3) : 0,
-                    distance_miles: data.distance.toFixed(1),
-                    energy_used_kwh: data.energy.toFixed(1),
-                    drives: data.drives
-                }))
-            };
-        }
+        if (dist === 0) return { error: "No efficiency data" };
 
-        return trends;
+        const daily = Array.from(dailyData.entries()).slice(0, 10).map(([d, [mi, kw]]) => 
+            ({ d, eff: Math.round((kw/mi)*1000)/1000, mi: Math.round(mi) }));
+
+        return {
+            drives: drives.results.length,
+            eff: Math.round((energy/dist)*1000)/1000, // kWh/mi
+            tot_mi: Math.round(dist),
+            tot_kw: Math.round(energy),
+            daily: daily.slice(0, 7) // Max 7 days to save tokens
+        };
     }
 
     async getChargingCostAnalysis(vin, options = {}) {
@@ -671,75 +777,46 @@ class TessieClient {
                 return { error: "No driving data available for FSD analysis" };
             }
 
-            const summary = {
-                period: {
-                    start: options.start || 'All time',
-                    end: options.end || 'Present'
-                },
-                total_drives: drives.results.length,
-                analyzed_drives: 0,
-                estimated_fsd_usage: {
-                    high_confidence_drives: 0,
-                    moderate_confidence_drives: 0,
-                    total_fsd_miles: 0,
-                    total_miles: 0,
-                    fsd_percentage: 0
-                },
-                drive_analysis: []
-            };
+            // ULTRA-COMPACT TOKEN-OPTIMIZED RESPONSE
+            let totalMiles = 0, fsdMiles = 0, highConf = 0, modConf = 0;
+            const samples = [];
 
-            let totalMiles = 0;
-            let fsdMiles = 0;
+            // Drastically reduced analysis - only 15 recent drives
+            const drivesToAnalyze = drives.results.slice(0, 15);
 
-            // Analyze a sample of drives (limit to prevent API overload)
-            const drivesToAnalyze = drives.results.slice(0, 50);
-
-            for (const drive of drivesToAnalyze) {
-                // Use correct field names from Tessie API
-                const distanceMiles = drive.odometer_distance || 0;
-                const durationMinutes = (drive.ended_at && drive.started_at) ? 
-                    (drive.ended_at - drive.started_at) / 60 : 0;
-                
-                if (distanceMiles > 0) {
-                    totalMiles += distanceMiles;
+            for (const d of drivesToAnalyze) {
+                const dist = d.odometer_distance || 0;
+                if (dist > 0.1) { // Skip micro-movements
+                    const dur = (d.ended_at && d.started_at) ? (d.ended_at - d.started_at) / 60 : 0;
+                    totalMiles += dist;
                     
-                    // Create normalized drive object for scoring
-                    const normalizedDrive = {
-                        ...drive,
-                        distance_miles: distanceMiles,
-                        duration_minutes: durationMinutes
-                    };
-                    
-                    // For this summary, use simplified heuristics (avoid API calls for each drive)
-                    const simpleFSDScore = this.estimateFSDFromDriveData(normalizedDrive);
-                    
-                    if (simpleFSDScore >= 60) {
-                        summary.estimated_fsd_usage.high_confidence_drives++;
-                        fsdMiles += distanceMiles;
-                    } else if (simpleFSDScore >= 40) {
-                        summary.estimated_fsd_usage.moderate_confidence_drives++;
-                        fsdMiles += distanceMiles * 0.5; // Partial FSD usage
-                    }
-
-                    summary.drive_analysis.push({
-                        drive_id: drive.id,
-                        date: drive.started_at,
-                        distance_miles: distanceMiles,
-                        duration_minutes: durationMinutes,
-                        estimated_fsd_score: simpleFSDScore,
-                        likely_fsd: simpleFSDScore >= 60,
-                        autopilot_distance: drive.autopilot_distance
+                    const score = this.estimateFSDFromDriveData({
+                        ...d, distance_miles: dist, duration_minutes: dur
                     });
+                    
+                    if (score >= 60) { highConf++; fsdMiles += dist; }
+                    else if (score >= 40) { modConf++; fsdMiles += dist * 0.5; }
+
+                    // Only include significant drives to minimize tokens
+                    if (dist > 2 || score >= 70) {
+                        samples.push({
+                            mi: Math.round(dist * 10) / 10,
+                            min: Math.round(dur),
+                            sc: score,
+                            fsd: score >= 60
+                        });
+                    }
                 }
             }
 
-            summary.analyzed_drives = drivesToAnalyze.length;
-            summary.estimated_fsd_usage.total_miles = Math.round(totalMiles * 100) / 100;
-            summary.estimated_fsd_usage.total_fsd_miles = Math.round(fsdMiles * 100) / 100;
-            summary.estimated_fsd_usage.fsd_percentage = totalMiles > 0 ? 
-                Math.round((fsdMiles / totalMiles) * 10000) / 100 : 0;
-
-            return summary;
+            return {
+                total: drives.results.length,
+                analyzed: drivesToAnalyze.length,
+                fsd_pct: totalMiles > 0 ? Math.round((fsdMiles / totalMiles) * 100) : 0,
+                conf: { hi: highConf, med: modConf },
+                miles: { tot: Math.round(totalMiles), fsd: Math.round(fsdMiles) },
+                samples: samples.slice(0, 8) // Max 8 sample drives
+            };
 
         } catch (error) {
             return { error: `FSD usage analysis failed: ${error.message}` };
@@ -3040,7 +3117,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.getDriveState(vinDS);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_climate_state':
@@ -3051,7 +3128,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.getClimateState(vinCS);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_detailed_vehicle_state':
@@ -3062,7 +3139,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.getDetailedVehicleState(vinDVS);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_charge_state':
@@ -3073,7 +3150,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.getChargeState(vinCHS);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_gui_settings':
@@ -3084,7 +3161,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.getGuiSettings(vinGS);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 // Advanced Analytics Handlers
@@ -3100,7 +3177,7 @@ class TessieMCPServer {
                     if (args.end) effOptions.end = args.end;
                     
                     result = await this.tessieClient.getEfficiencyTrends(vinET, effOptions);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_charging_cost_analysis':
@@ -3115,7 +3192,7 @@ class TessieMCPServer {
                     if (args.end) costOptions.end = args.end;
                     
                     result = await this.tessieClient.getChargingCostAnalysis(vinCCA, costOptions);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_usage_patterns':
@@ -3130,7 +3207,7 @@ class TessieMCPServer {
                     if (args.end) usageOptions.end = args.end;
                     
                     result = await this.tessieClient.getUsagePatterns(vinUP, usageOptions);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_monthly_summary':
@@ -3146,7 +3223,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.getMonthlySummary(vinMS, args.year, args.month);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 // FSD Detection & Analysis Handlers
@@ -3163,7 +3240,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.analyzeDriveFSDProbability(vinAFP, args.drive_id);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'get_fsd_usage_summary':
@@ -3178,7 +3255,7 @@ class TessieMCPServer {
                     if (args.end) fsdSummaryOptions.end = args.end;
                     
                     result = await this.tessieClient.getFSDUsageSummary(vinFUS, fsdSummaryOptions);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'compare_fsd_manual_efficiency':
@@ -3193,7 +3270,7 @@ class TessieMCPServer {
                     if (args.end) efficiencyOptions.end = args.end;
                     
                     result = await this.tessieClient.compareFSDManualEfficiency(vinCFME, efficiencyOptions);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 // Export & Data Portability Handlers
@@ -3210,7 +3287,7 @@ class TessieMCPServer {
                     }
                     
                     result = await this.tessieClient.exportTaxMileageReport(vinTMR, args.year);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'export_charging_cost_spreadsheet':
@@ -3225,7 +3302,7 @@ class TessieMCPServer {
                     if (args.end) exportChargingOptions.end = args.end;
                     
                     result = await this.tessieClient.exportChargingCostSpreadsheet(vinECCS, exportChargingOptions);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 case 'export_fsd_detection_report':
@@ -3240,7 +3317,7 @@ class TessieMCPServer {
                     if (args.end) exportFSDOptions.end = args.end;
                     
                     result = await this.tessieClient.exportFSDDetectionReport(vinEFDR, exportFSDOptions);
-                    this.sendResponse(message.id, { content: [{ type: "text", text: JSON.stringify(result, null, 2) }] });
+                    this.sendResponse(message.id, { content: [{ type: "text", text: this.validateResponseSize(this.compactJson(result)) }] });
                     break;
 
                 // Predictive Analytics Handlers
@@ -3323,7 +3400,7 @@ class TessieMCPServer {
                 content: [
                     {
                         type: "text",
-                        text: JSON.stringify(result, null, 2)
+                        text: this.validateResponseSize(this.compactJson(result))
                     }
                 ]
             });
