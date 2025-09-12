@@ -1,13 +1,15 @@
 {
-  "mcpb_version": "0.1.0",
+  "dxt_version": "0.1.0",
   "name": "Tessie",
   "version": "1.0.0",
-  "author": "Keith",
+  "author": {
+    "name": "Keith"
+  },
   "description": "Query your Tesla vehicle data through Tessie API - get mileage, location history, driving statistics, and more",
   "keywords": ["tesla", "tessie", "vehicle", "car", "mileage", "location", "driving"],
   "server": {
-    "type": "node",
-    "entry": "server/index.js"
+    "command": "node",
+    "args": ["server/index.js"]
   },
   "config": {
     "tessie_api_token": {
@@ -16,8 +18,5 @@
       "description": "Your Tessie API access token from https://tessie.com",
       "required": true
     }
-  },
-  "permissions": {
-    "network": ["tessie.com"]
   }
 }
