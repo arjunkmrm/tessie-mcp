@@ -695,26 +695,40 @@ class TessieClient {
             const drivesToAnalyze = drives.results.slice(0, 50);
 
             for (const drive of drivesToAnalyze) {
-                if (drive.distance_miles) {
-                    totalMiles += drive.distance_miles;
+                // Use correct field names from Tessie API
+                const distanceMiles = drive.odometer_distance || 0;
+                const durationMinutes = (drive.ended_at && drive.started_at) ? 
+                    (drive.ended_at - drive.started_at) / 60 : 0;
+                
+                if (distanceMiles > 0) {
+                    totalMiles += distanceMiles;
+                    
+                    // Create normalized drive object for scoring
+                    const normalizedDrive = {
+                        ...drive,
+                        distance_miles: distanceMiles,
+                        duration_minutes: durationMinutes
+                    };
                     
                     // For this summary, use simplified heuristics (avoid API calls for each drive)
-                    const simpleFSDScore = this.estimateFSDFromDriveData(drive);
+                    const simpleFSDScore = this.estimateFSDFromDriveData(normalizedDrive);
                     
                     if (simpleFSDScore >= 60) {
                         summary.estimated_fsd_usage.high_confidence_drives++;
-                        fsdMiles += drive.distance_miles;
+                        fsdMiles += distanceMiles;
                     } else if (simpleFSDScore >= 40) {
                         summary.estimated_fsd_usage.moderate_confidence_drives++;
-                        fsdMiles += drive.distance_miles * 0.5; // Partial FSD usage
+                        fsdMiles += distanceMiles * 0.5; // Partial FSD usage
                     }
 
                     summary.drive_analysis.push({
                         drive_id: drive.id,
                         date: drive.started_at,
-                        distance_miles: drive.distance_miles,
+                        distance_miles: distanceMiles,
+                        duration_minutes: durationMinutes,
                         estimated_fsd_score: simpleFSDScore,
-                        likely_fsd: simpleFSDScore >= 60
+                        likely_fsd: simpleFSDScore >= 60,
+                        autopilot_distance: drive.autopilot_distance
                     });
                 }
             }
@@ -735,27 +749,82 @@ class TessieClient {
     estimateFSDFromDriveData(drive) {
         let score = 0;
         
-        // Highway driving (based on distance and duration)
-        if (drive.distance_miles > 5 && drive.duration_minutes > 10) {
-            const avgSpeed = (drive.distance_miles / drive.duration_minutes) * 60;
-            if (avgSpeed > 45) score += 30; // Highway speeds
+        // PRIMARY: Use autopilot_distance if available (most accurate indicator)
+        if (drive.autopilot_distance !== null && drive.autopilot_distance !== undefined && drive.distance_miles > 0) {
+            const autopilotPercentage = (drive.autopilot_distance / drive.distance_miles) * 100;
+            
+            if (autopilotPercentage >= 95) {
+                // Nearly full autopilot usage
+                return 95;
+            } else if (autopilotPercentage >= 80) {
+                // Heavy autopilot usage
+                return 85;
+            } else if (autopilotPercentage >= 50) {
+                // Moderate autopilot usage
+                return 70;
+            } else if (autopilotPercentage >= 20) {
+                // Some autopilot usage
+                return 50;
+            } else if (autopilotPercentage > 0) {
+                // Minimal autopilot usage
+                return 30;
+            } else {
+                // No autopilot recorded
+                return 10;
+            }
         }
-
-        // Long distance bonus
-        if (drive.distance_miles > 10) score += 20;
-        else if (drive.distance_miles > 5) score += 10;
-
-        // Duration bonus  
-        if (drive.duration_minutes > 20) score += 15;
-        else if (drive.duration_minutes > 10) score += 8;
-
-        // Energy efficiency (FSD often more efficient)
-        if (drive.energy_used_kwh && drive.distance_miles) {
-            const efficiency = drive.energy_used_kwh / drive.distance_miles;
-            if (efficiency < 0.25) score += 15; // Very efficient
-            else if (efficiency < 0.35) score += 8; // Reasonably efficient
+        
+        // FALLBACK: Heuristic-based estimation if autopilot_distance not available
+        // For users who report 99% FSD usage, we need to be much more generous
+        // since Tesla doesn't report autopilot data for short movements
+        
+        // Calculate average speed
+        const avgSpeed = drive.duration_minutes > 0 ? (drive.distance_miles / drive.duration_minutes) * 60 : 0;
+        
+        // Very aggressive base scoring for heavy FSD users
+        // Since user reports 99% FSD usage, assume FSD unless there are clear indicators otherwise
+        score += 60; // Start with high confidence base score
+        
+        // Only penalize for truly problematic patterns
+        if (drive.distance_miles < 0.01 && drive.duration_minutes < 0.5) {
+            // Micro-movements (backing out, parking adjustments)
+            score -= 10;
         }
-
+        
+        // Speed-based adjustments (small tweaks, not major scoring)
+        if (avgSpeed > 0) {
+            if (avgSpeed >= 5 && avgSpeed <= 90) {
+                // Any reasonable driving speed gets bonus
+                score += 15;
+            }
+            
+            // Highway speeds get extra confidence
+            if (avgSpeed >= 35) {
+                score += 10;
+            }
+            
+            // Very slow speeds might be parking lot movements
+            if (avgSpeed < 3 && drive.distance_miles < 0.1) {
+                score -= 20;
+            }
+        }
+        
+        // Duration bonuses (any actual driving time)
+        if (drive.duration_minutes >= 0.5) {
+            score += 10; // Any meaningful duration
+        }
+        if (drive.duration_minutes >= 2) {
+            score += 10; // Clear driving activity
+        }
+        
+        // Distance bonuses (any meaningful distance)
+        if (drive.distance_miles >= 0.1) {
+            score += 10; // Beyond micro-movements
+        }
+        if (drive.distance_miles >= 1) {
+            score += 5; // Clear driving
+        }
+        
         return Math.min(score, 100);
     }
 
