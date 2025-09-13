@@ -2,7 +2,7 @@
   "dxt_version": "0.1",
   "name": "tessie",
   "display_name": "Tessie",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Complete Tesla analytics platform through Tessie API - 46+ tools including predictive analytics, maintenance forecasting, anomaly detection, seasonal analysis, annual reports, and comprehensive insights. Now with fixed FSD detection algorithm for accurate autopilot usage analysis.",
   "author": {
     "name": "keithah@github"

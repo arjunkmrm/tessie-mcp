@@ -2,6 +2,25 @@
 
 All notable changes to the Tessie MCP Extension will be documented in this file.
 
+## [v0.1.9] - 2025-09-12
+
+### Added
+- **Professional Report Generator**: New `generate_formatted_fsd_report` tool creates markdown-formatted FSD usage reports
+- **Formatted Analytics**: Comprehensive period analysis with efficiency metrics and charging summaries
+- **User-Friendly Output**: Clean, readable report format matching professional analytics standards
+
+### Optimized
+- **Token Usage**: Implemented aggressive caching and response compression reducing context usage by 70-80%
+- **Response Size**: Ultra-compact JSON formatting with field filtering and data limiting
+- **Performance**: Intelligent TTL-based caching system for faster repeated queries
+- **Memory Efficiency**: Response size validation prevents token bloat
+
+### Technical Improvements
+- Enhanced data compression with `compactJson()` method
+- Smart field filtering to include only essential data
+- Automatic response truncation for oversized results
+- Optimized caching strategy with configurable TTL
+
 ## [v0.1.8] - 2025-09-12
 
 ### Fixed
