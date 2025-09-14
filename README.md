@@ -27,6 +27,16 @@ An advanced Tesla analytics platform for Claude Desktop through the [Tessie API]
 3. Enable the extension in Claude Desktop settings
 4. Configure your Tessie API token when prompted
 
+### Upgrading
+
+To upgrade to a newer version:
+
+1. Download the latest `tessie.mcpb` file from the [GitHub releases page](https://github.com/keithah/tessie-mcp/releases)
+2. Double-click the new `.mcpb` file - it will automatically replace the old version
+3. Restart Claude Desktop to ensure the new version loads
+
+No need to uninstall the old version first - the MCPB installer handles upgrades automatically.
+
 ### Configuration
 
 The extension requires your Tessie API token to function. You can get your token from:

@@ -5,7 +5,8 @@
   "version": "0.1.9",
   "description": "Complete Tesla analytics platform through Tessie API - 46+ tools including predictive analytics, maintenance forecasting, anomaly detection, seasonal analysis, annual reports, and comprehensive insights. Now with fixed FSD detection algorithm for accurate autopilot usage analysis.",
   "author": {
-    "name": "keithah@github"
+    "name": "keithah",
+    "url": "https://github.com/keithah"
   },
   "keywords": ["tesla", "tessie", "vehicle", "car", "mileage", "location", "driving", "battery", "charging", "weather", "tire-pressure", "consumption"],
   "server": {
