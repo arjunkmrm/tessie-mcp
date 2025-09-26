@@ -86,6 +86,17 @@ export class TessieQueryOptimizer {
         }
         break;
 
+      case 'analyze_latest_drive':
+        complexity = 40; // High complexity due to drive merging and analysis
+        estimatedSize = 25; // Medium size due to comprehensive analysis
+        apiCalls = 1;
+
+        if (parameters.days_back && parameters.days_back > 7) {
+          suggestions.push('Consider limiting search to 7 days for faster analysis');
+          complexity += 10;
+        }
+        break;
+
       default:
         complexity = 10;
         estimatedSize = 5;
@@ -137,6 +148,14 @@ export class TessieQueryOptimizer {
           recommendations.push('Enabled cache to prevent vehicle wake-up');
         }
         break;
+
+      case 'analyze_latest_drive':
+        // Optimize days_back parameter
+        if (!parameters.days_back || parameters.days_back > 14) {
+          optimizedParams.days_back = 7;
+          recommendations.push('Limited search to 7 days for optimal performance');
+        }
+        break;
     }
 
     const optimizedMetrics = this.analyzeQuery(operation, optimizedParams);
@@ -162,6 +181,31 @@ export class TessieQueryOptimizer {
   // Parse natural language queries
   parseNaturalLanguage(query: string): { operation: string; parameters: any; confidence: number } {
     const lowerQuery = query.toLowerCase();
+
+    // Drive analysis patterns - check first for most specific matches
+    if ((lowerQuery.includes('latest') || lowerQuery.includes('last') || lowerQuery.includes('recent')) &&
+        (lowerQuery.includes('drive') || lowerQuery.includes('trip')) &&
+        (lowerQuery.includes('analyz') || lowerQuery.includes('detail') || lowerQuery.includes('how long') ||
+         lowerQuery.includes('battery') || lowerQuery.includes('fsd') || lowerQuery.includes('duration'))) {
+      const daysBack = lowerQuery.includes('yesterday') ? 2 :
+                      lowerQuery.includes('today') ? 1 : 7;
+      return {
+        operation: 'analyze_latest_drive',
+        parameters: { days_back: daysBack },
+        confidence: 0.95
+      };
+    }
+
+    // Post-drive analysis patterns
+    if ((lowerQuery.includes('finish') || lowerQuery.includes('completed') || lowerQuery.includes('just drove')) &&
+        (lowerQuery.includes('how long') || lowerQuery.includes('battery') || lowerQuery.includes('duration') ||
+         lowerQuery.includes('analyz') || lowerQuery.includes('fsd'))) {
+      return {
+        operation: 'analyze_latest_drive',
+        parameters: { days_back: 1 },
+        confidence: 0.9
+      };
+    }
 
     // Enhanced weekly/monthly mileage patterns
     if ((lowerQuery.includes('week') || lowerQuery.includes('month')) &&

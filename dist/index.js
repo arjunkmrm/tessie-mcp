@@ -43,6 +43,7 @@ const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const tessie_client_js_1 = require("./tessie-client.js");
 const query_optimizer_js_1 = require("./query-optimizer.js");
+const drive_analyzer_js_1 = require("./drive-analyzer.js");
 const zod_1 = require("zod");
 exports.configSchema = zod_1.z.object({
     tessie_api_token: zod_1.z.string().describe("Tessie API token for accessing vehicle data"),
@@ -57,6 +58,7 @@ class TessieMcpServer {
         this.config = null;
         this.config = config || null;
         this.queryOptimizer = new query_optimizer_js_1.TessieQueryOptimizer();
+        this.driveAnalyzer = new drive_analyzer_js_1.DriveAnalyzer();
         this.server = new index_js_1.Server({
             name: 'tessie-mcp-server',
             version: '1.0.0',
@@ -198,6 +200,25 @@ class TessieMcpServer {
                         required: ['query'],
                     },
                 },
+                {
+                    name: 'analyze_latest_drive',
+                    description: 'Analyze the most recent drive with comprehensive metrics including duration, battery consumption, FSD usage, and drive merging for stops <7 minutes',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            vin: {
+                                type: 'string',
+                                description: 'Vehicle identification number (VIN)',
+                            },
+                            days_back: {
+                                type: 'number',
+                                description: 'Number of days to look back for recent drives',
+                                default: 7,
+                            },
+                        },
+                        required: ['vin'],
+                    },
+                },
             ],
         }));
         this.server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
@@ -226,6 +247,8 @@ class TessieMcpServer {
                         return await this.handleGetVehicles();
                     case 'natural_language_query':
                         return await this.handleNaturalLanguageQuery(args);
+                    case 'analyze_latest_drive':
+                        return await this.handleAnalyzeLatestDrive(args);
                     default:
                         throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
                 }
@@ -556,6 +579,94 @@ class TessieMcpServer {
             autopilot_miles: Math.round(stats.autopilot_miles * 100) / 100,
             fsd_percentage: stats.miles > 0 ? Math.round((stats.autopilot_miles / stats.miles) * 10000) / 100 : 0,
         }));
+    }
+    async handleAnalyzeLatestDrive(args) {
+        const { vin, days_back = 7 } = args;
+        // Calculate date range for recent drives
+        const endDate = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days_back);
+        // Get recent drives
+        const drives = await this.tessieClient.getDrives(vin, startDate.toISOString(), endDate.toISOString(), 100 // Get more drives to ensure we have recent ones
+        );
+        if (drives.length === 0) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            error: 'No drives found in the specified time period',
+                            period: `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`,
+                            suggestion: 'Try increasing days_back or check if the vehicle has been driven recently'
+                        }, null, 2)
+                    }
+                ]
+            };
+        }
+        // Analyze the latest drive
+        const analysis = this.driveAnalyzer.analyzeLatestDrive(drives);
+        if (!analysis) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            error: 'Could not analyze drives',
+                            drives_found: drives.length,
+                            suggestion: 'Drives may be incomplete or missing required data'
+                        }, null, 2)
+                    }
+                ]
+            };
+        }
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify({
+                        analysis_summary: analysis.summary,
+                        detailed_analysis: {
+                            drive_details: {
+                                id: analysis.mergedDrive.id,
+                                original_drives: analysis.mergedDrive.originalDriveIds.length,
+                                start_time: new Date(analysis.mergedDrive.started_at * 1000).toISOString(),
+                                end_time: new Date(analysis.mergedDrive.ended_at * 1000).toISOString(),
+                                route: `${analysis.mergedDrive.starting_location} → ${analysis.mergedDrive.ending_location}`,
+                                distance_miles: analysis.mergedDrive.total_distance,
+                                total_duration_minutes: analysis.mergedDrive.total_duration_minutes,
+                                driving_duration_minutes: analysis.mergedDrive.driving_duration_minutes,
+                                average_speed_mph: analysis.mergedDrive.average_speed,
+                                max_speed_mph: analysis.mergedDrive.max_speed
+                            },
+                            stops: analysis.mergedDrive.stops.map(stop => ({
+                                location: stop.location,
+                                duration_minutes: stop.duration_minutes,
+                                type: stop.stop_type,
+                                time: `${new Date(stop.started_at * 1000).toLocaleTimeString()} - ${new Date(stop.ended_at * 1000).toLocaleTimeString()}`
+                            })),
+                            battery_analysis: {
+                                starting_level: `${analysis.mergedDrive.starting_battery}%`,
+                                ending_level: `${analysis.mergedDrive.ending_battery}%`,
+                                percentage_consumed: `${analysis.batteryConsumption.percentage_used}%`,
+                                estimated_kwh_used: analysis.batteryConsumption.estimated_kwh_used,
+                                efficiency_miles_per_kwh: analysis.batteryConsumption.efficiency_miles_per_kwh
+                            },
+                            fsd_analysis: {
+                                autopilot_miles: analysis.fsdAnalysis.total_autopilot_miles,
+                                fsd_percentage: `${analysis.fsdAnalysis.fsd_percentage}%`,
+                                data_available: analysis.fsdAnalysis.autopilot_available,
+                                note: analysis.fsdAnalysis.note
+                            }
+                        },
+                        metadata: {
+                            analysis_time: new Date().toISOString(),
+                            drives_analyzed: drives.length,
+                            period_searched: `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`
+                        }
+                    }, null, 2)
+                }
+            ]
+        };
     }
     async run() {
         const transport = new stdio_js_1.StdioServerTransport();
