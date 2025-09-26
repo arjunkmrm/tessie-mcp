@@ -365,6 +365,9 @@ class TessieMcpServer {
         await this.server.connect(transport);
         console.error('Tessie MCP server running on stdio');
     }
+    getServer() {
+        return this.server;
+    }
 }
 // Traditional MCP server run (for local usage)
 if (require.main === module) {
@@ -376,8 +379,9 @@ function default_1({ config }) {
     const server = new TessieMcpServer(config);
     return {
         async start() {
-            await server.run();
-            return server;
+            // For Smithery, just return the configured server without connecting to stdio
+            // Smithery will handle the transport layer
+            return server.getServer();
         },
         async stop() {
             // Server cleanup if needed
