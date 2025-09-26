@@ -2,3 +2,5 @@ runtime: "typescript"
 description: "MCP server for Tessie API vehicle data queries"
 author: "Keith"
 repository: "https://github.com/keithah/tessie-mcp"
+build:
+  command: "npm run build"
