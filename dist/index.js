@@ -42,6 +42,7 @@ const index_js_1 = require("@modelcontextprotocol/sdk/server/index.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const tessie_client_js_1 = require("./tessie-client.js");
+const query_optimizer_js_1 = require("./query-optimizer.js");
 const zod_1 = require("zod");
 exports.configSchema = zod_1.z.object({
     tessie_api_token: zod_1.z.string().describe("Tessie API token for accessing vehicle data"),
@@ -55,6 +56,7 @@ class TessieMcpServer {
         this.tessieClient = null;
         this.config = null;
         this.config = config || null;
+        this.queryOptimizer = new query_optimizer_js_1.TessieQueryOptimizer();
         this.server = new index_js_1.Server({
             name: 'tessie-mcp-server',
             version: '1.0.0',
@@ -178,6 +180,24 @@ class TessieMcpServer {
                         properties: {},
                     },
                 },
+                {
+                    name: 'natural_language_query',
+                    description: 'Process natural language queries about your vehicle data (e.g., "How many miles did I drive last week?")',
+                    inputSchema: {
+                        type: 'object',
+                        properties: {
+                            query: {
+                                type: 'string',
+                                description: 'Natural language query about vehicle data',
+                            },
+                            vin: {
+                                type: 'string',
+                                description: 'Vehicle identification number (VIN) - optional if only one vehicle',
+                            },
+                        },
+                        required: ['query'],
+                    },
+                },
             ],
         }));
         this.server.setRequestHandler(types_js_1.CallToolRequestSchema, async (request) => {
@@ -204,6 +224,8 @@ class TessieMcpServer {
                         return await this.handleGetWeeklyMileage(args);
                     case 'get_vehicles':
                         return await this.handleGetVehicles();
+                    case 'natural_language_query':
+                        return await this.handleNaturalLanguageQuery(args);
                     default:
                         throw new types_js_1.McpError(types_js_1.ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
                 }
@@ -344,6 +366,163 @@ class TessieMcpServer {
                         vehicles: vehicles,
                         count: vehicles.length,
                     }, null, 2),
+                },
+            ],
+        };
+    }
+    async handleNaturalLanguageQuery(args) {
+        const { query, vin } = args;
+        // First, try to parse the natural language query
+        const parsedQuery = this.queryOptimizer.parseNaturalLanguage(query);
+        if (parsedQuery.confidence < 0.5) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            error: 'Unable to understand the query',
+                            suggestions: [
+                                'Try asking about weekly mileage: "How many miles did I drive last week?"',
+                                'Ask about driving history: "Show me my recent trips"',
+                                'Check current status: "What is my car\'s current state?"',
+                                'List vehicles: "Show me all my vehicles"'
+                            ],
+                            confidence: parsedQuery.confidence,
+                            query_analysis: {
+                                original_query: query,
+                                detected_patterns: this.analyzeQueryPatterns(query),
+                            }
+                        }, null, 2),
+                    },
+                ],
+            };
+        }
+        // Analyze and optimize the query
+        const optimization = this.queryOptimizer.optimizeForMCP(parsedQuery.operation, parsedQuery.parameters);
+        const metrics = this.queryOptimizer.analyzeQuery(parsedQuery.operation, optimization.optimizedParameters || parsedQuery.parameters);
+        // If no VIN provided and we need one, try to get the first vehicle
+        let targetVin = vin;
+        if (!targetVin && parsedQuery.operation !== 'get_vehicles') {
+            const vehicles = await this.tessieClient.getVehicles();
+            if (vehicles.length === 0) {
+                return {
+                    content: [
+                        {
+                            type: 'text',
+                            text: JSON.stringify({
+                                error: 'No vehicles found in your Tessie account',
+                            }, null, 2),
+                        },
+                    ],
+                };
+            }
+            targetVin = vehicles[0].vin;
+        }
+        // Use optimized parameters if available
+        const finalParams = { ...optimization.optimizedParameters || parsedQuery.parameters };
+        if (targetVin && parsedQuery.operation !== 'get_vehicles') {
+            finalParams.vin = targetVin;
+        }
+        // Execute the parsed operation
+        try {
+            let result;
+            switch (parsedQuery.operation) {
+                case 'get_weekly_mileage':
+                    result = await this.handleGetWeeklyMileage(finalParams);
+                    break;
+                case 'get_driving_history':
+                    result = await this.handleGetDrivingHistory(finalParams);
+                    break;
+                case 'get_vehicle_current_state':
+                    result = await this.handleGetVehicleCurrentState(finalParams);
+                    break;
+                case 'get_vehicles':
+                    result = await this.handleGetVehicles();
+                    break;
+                default:
+                    return {
+                        content: [
+                            {
+                                type: 'text',
+                                text: JSON.stringify({
+                                    error: 'Unsupported operation',
+                                    operation: parsedQuery.operation,
+                                    confidence: parsedQuery.confidence,
+                                }, null, 2),
+                            },
+                        ],
+                    };
+            }
+            // Enhance result with optimization metadata
+            const enhancedResult = this.enhanceResultWithMetadata(result, {
+                original_query: query,
+                parsed_operation: parsedQuery.operation,
+                confidence: parsedQuery.confidence,
+                optimization: optimization,
+                metrics: metrics,
+                parameters_used: finalParams
+            });
+            return enhancedResult;
+        }
+        catch (error) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: JSON.stringify({
+                            error: 'Failed to execute query',
+                            details: error instanceof Error ? error.message : 'Unknown error',
+                            original_query: query,
+                            parsed_operation: parsedQuery.operation,
+                            parameters: finalParams,
+                            optimization_applied: optimization.isOptimized,
+                            recommendations: optimization.recommendations,
+                        }, null, 2),
+                    },
+                ],
+            };
+        }
+    }
+    analyzeQueryPatterns(query) {
+        const patterns = [];
+        const lowerQuery = query.toLowerCase();
+        if (lowerQuery.includes('week'))
+            patterns.push('temporal_weekly');
+        if (lowerQuery.includes('month'))
+            patterns.push('temporal_monthly');
+        if (lowerQuery.includes('mile') || lowerQuery.includes('driv'))
+            patterns.push('distance_related');
+        if (lowerQuery.includes('last') || lowerQuery.includes('previous'))
+            patterns.push('historical');
+        if (lowerQuery.includes('break') || lowerQuery.includes('basis'))
+            patterns.push('breakdown_requested');
+        if (lowerQuery.includes('current') || lowerQuery.includes('now'))
+            patterns.push('current_state');
+        return patterns;
+    }
+    enhanceResultWithMetadata(result, metadata) {
+        const originalData = JSON.parse(result.content[0].text);
+        const enhancedData = {
+            ...originalData,
+            query_metadata: {
+                natural_language_query: metadata.original_query,
+                operation: metadata.parsed_operation,
+                confidence: metadata.confidence,
+                optimization_applied: metadata.optimization.isOptimized,
+                performance_metrics: {
+                    estimated_response_size_kb: metadata.metrics.estimatedResponseSize,
+                    complexity_score: metadata.metrics.complexity,
+                    api_calls_required: metadata.metrics.apiCallsRequired,
+                },
+                recommendations: metadata.optimization.recommendations.length > 0 ? metadata.optimization.recommendations : undefined,
+                parameters_used: metadata.parameters_used,
+            }
+        };
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: JSON.stringify(enhancedData, null, 2),
                 },
             ],
         };
