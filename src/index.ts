@@ -366,5 +366,24 @@ class TessieMcpServer {
   }
 }
 
-const server = new TessieMcpServer();
-server.run().catch(console.error);
+// Traditional MCP server run (for local usage)
+if (require.main === module) {
+  const server = new TessieMcpServer();
+  server.run().catch(console.error);
+}
+
+// Smithery-compliant export (stateless)
+export default function({ config }: { config?: any }) {
+  const server = new TessieMcpServer();
+
+  return {
+    async start() {
+      await server.run();
+      return server;
+    },
+
+    async stop() {
+      // Server cleanup if needed
+    }
+  };
+}
