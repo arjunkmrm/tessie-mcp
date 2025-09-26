@@ -45,15 +45,17 @@ describe('Tessie MCP Server', () => {
       expect(typeof server).toBe('object');
     });
 
-    test('createServer should work without config', () => {
-      const server = createServer({});
+    test('createServer should work with valid config', () => {
+      const config = { tessie_api_token: 'test-token-123' };
+      const server = createServer({ config });
 
       expect(server).toBeDefined();
       expect(typeof server).toBe('object');
     });
 
     test('server should be a valid MCP server', () => {
-      const server = createServer({});
+      const config = { tessie_api_token: 'test-token-123' };
+      const server = createServer({ config });
 
       expect(server).toBeDefined();
       expect(typeof server.setRequestHandler).toBe('function');
@@ -169,7 +171,7 @@ describe('Tessie MCP Server', () => {
 
     test('should handle missing configuration gracefully', () => {
       expect(() => {
-        createServer({});
+        createServer({ config: { tessie_api_token: 'test-token' } });
       }).not.toThrow();
     });
   });
@@ -183,13 +185,13 @@ describe('Tessie MCP Server', () => {
       expect(smitheryServer).toBeDefined();
 
       // Standalone usage
-      const standaloneServer = createServer({});
+      const standaloneServer = createServer({ config: { tessie_api_token: 'test-token' } });
       expect(standaloneServer).toBeDefined();
     });
 
     test('should maintain backward compatibility', () => {
       // Test that the old environment variable approach still works
-      const server = createServer({});
+      const server = createServer({ config: { tessie_api_token: 'test-token' } });
       expect(server).toBeDefined();
 
       // The server should be able to fall back to environment variables

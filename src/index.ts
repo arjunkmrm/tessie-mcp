@@ -16,9 +16,12 @@ import { TessieQueryOptimizer } from './query-optimizer.js';
 import { DriveAnalyzer } from './drive-analyzer.js';
 import { z } from 'zod';
 
+// Configuration schema - automatically detected by Smithery
 export const configSchema = z.object({
-  tessie_api_token: z.string().describe("Tessie API token for accessing vehicle data"),
-});
+  tessie_api_token: z.string()
+    .min(1)
+    .describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
+}).describe("Tessie Vehicle Data Configuration");
 
 // Define parameter schema for URL-based configuration
 export const parameterSchema = z.object({
@@ -217,7 +220,7 @@ class TessieMcpServer {
           if (!accessToken) {
             throw new McpError(
               ErrorCode.InvalidRequest,
-              'Tessie API token is required. Please add tessie_api_token to your MCP server URL like: your-server-url?tessie_api_token=your_token_here'
+              'Tessie API token is required. Please configure tessie_api_token in the server settings or add it to your MCP server URL. Get your token from https://my.tessie.com/settings/api'
             );
           }
           this.tessieClient = new TessieClient(accessToken);
@@ -719,7 +722,7 @@ if (require.main === module) {
 }
 
 // Smithery-compliant export
-export default function createServer({ config }: { config?: z.infer<typeof configSchema> }) {
+export default function createServer({ config }: { config: z.infer<typeof configSchema> }) {
   const serverInstance = new TessieMcpServer(config);
   return serverInstance.getServer();
 }

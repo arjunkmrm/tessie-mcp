@@ -45,9 +45,12 @@ const tessie_client_js_1 = require("./tessie-client.js");
 const query_optimizer_js_1 = require("./query-optimizer.js");
 const drive_analyzer_js_1 = require("./drive-analyzer.js");
 const zod_1 = require("zod");
+// Configuration schema - automatically detected by Smithery
 exports.configSchema = zod_1.z.object({
-    tessie_api_token: zod_1.z.string().describe("Tessie API token for accessing vehicle data"),
-});
+    tessie_api_token: zod_1.z.string()
+        .min(1)
+        .describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
+}).describe("Tessie Vehicle Data Configuration");
 // Define parameter schema for URL-based configuration
 exports.parameterSchema = zod_1.z.object({
     tessie_api_token: zod_1.z.string().optional().describe("Tessie API token for accessing vehicle data"),
@@ -230,7 +233,7 @@ class TessieMcpServer {
                         process.env.tessie_api_token ||
                         process.env.TESSIE_ACCESS_TOKEN;
                     if (!accessToken) {
-                        throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidRequest, 'Tessie API token is required. Please add tessie_api_token to your MCP server URL like: your-server-url?tessie_api_token=your_token_here');
+                        throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidRequest, 'Tessie API token is required. Please configure tessie_api_token in the server settings or add it to your MCP server URL. Get your token from https://my.tessie.com/settings/api');
                     }
                     this.tessieClient = new tessie_client_js_1.TessieClient(accessToken);
                 }

@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://smithery.ai/server/@keithah/tessie-mcp/.well-known/mcp-config",
+  "title": "Tessie Vehicle Data Configuration",
+  "description": "Configuration for connecting to the Tessie MCP server",
+  "x-query-style": "dot+bracket",
+  "type": "object",
+  "properties": {
+    "tessie_api_token": {
+      "type": "string",
+      "title": "Tessie API Token",
+      "description": "Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api",
+      "minLength": 1
+    }
+  },
+  "required": ["tessie_api_token"],
+  "additionalProperties": false
+}
