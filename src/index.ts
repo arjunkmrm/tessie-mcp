@@ -35,25 +35,14 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
     const driveAnalyzer = new DriveAnalyzer();
 
     // Register get_vehicle_current_state tool
-    server.addTool({
-      name: "get_vehicle_current_state",
-      description: "Get the current state of a vehicle including location, battery level, odometer reading",
-      parameters: {
-        type: "object",
-        properties: {
-          vin: {
-            type: "string",
-            description: "Vehicle identification number (VIN)"
-          },
-          use_cache: {
-            type: "boolean",
-            description: "Whether to use cached data to avoid waking the vehicle",
-            default: true
-          }
-        },
-        required: ["vin"]
+    server.tool(
+      "get_vehicle_current_state",
+      "Get the current state of a vehicle including location, battery level, odometer reading",
+      {
+        vin: z.string().describe("Vehicle identification number (VIN)"),
+        use_cache: z.boolean().optional().default(true).describe("Whether to use cached data to avoid waking the vehicle")
       },
-      call: async ({ vin, use_cache = true }) => {
+      async ({ vin, use_cache = true }) => {
         try {
           const state = await tessieClient.getVehicleState(vin, use_cache);
           return {
@@ -85,36 +74,19 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
           throw new Error(`Failed to get vehicle state: ${error}`);
         }
       }
-    });
+    );
 
     // Register get_driving_history tool
-    server.addTool({
-      name: "get_driving_history",
-      description: "Get driving history for a vehicle within a date range",
-      parameters: {
-        type: "object",
-        properties: {
-          vin: {
-            type: "string",
-            description: "Vehicle identification number (VIN)"
-          },
-          start_date: {
-            type: "string",
-            description: "Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)"
-          },
-          end_date: {
-            type: "string",
-            description: "End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)"
-          },
-          limit: {
-            type: "number",
-            description: "Maximum number of drives to return",
-            default: 50
-          }
-        },
-        required: ["vin"]
+    server.tool(
+      "get_driving_history",
+      "Get driving history for a vehicle within a date range",
+      {
+        vin: z.string().describe("Vehicle identification number (VIN)"),
+        start_date: z.string().optional().describe("Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)"),
+        end_date: z.string().optional().describe("End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)"),
+        limit: z.number().optional().default(50).describe("Maximum number of drives to return")
       },
-      call: async ({ vin, start_date, end_date, limit = 50 }) => {
+      async ({ vin, start_date, end_date, limit = 50 }) => {
         try {
           const drives = await tessieClient.getDrives(vin, start_date, end_date, limit);
           return {
@@ -144,31 +116,18 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
           throw new Error(`Failed to get driving history: ${error}`);
         }
       }
-    });
+    );
 
     // Register get_weekly_mileage tool
-    server.addTool({
-      name: "get_weekly_mileage",
-      description: "Calculate total miles driven in a specific week or time period",
-      parameters: {
-        type: "object",
-        properties: {
-          vin: {
-            type: "string",
-            description: "Vehicle identification number (VIN)"
-          },
-          start_date: {
-            type: "string",
-            description: "Start date of the period (ISO format)"
-          },
-          end_date: {
-            type: "string",
-            description: "End date of the period (ISO format)"
-          }
-        },
-        required: ["vin", "start_date", "end_date"]
+    server.tool(
+      "get_weekly_mileage",
+      "Calculate total miles driven in a specific week or time period",
+      {
+        vin: z.string().describe("Vehicle identification number (VIN)"),
+        start_date: z.string().describe("Start date of the period (ISO format)"),
+        end_date: z.string().describe("End date of the period (ISO format)")
       },
-      call: async ({ vin, start_date, end_date }) => {
+      async ({ vin, start_date, end_date }) => {
         try {
           const drives = await tessieClient.getDrives(vin, start_date, end_date, 500);
 
@@ -211,28 +170,17 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
           throw new Error(`Failed to get weekly mileage: ${error}`);
         }
       }
-    });
+    );
 
     // Register analyze_latest_drive tool
-    server.addTool({
-      name: "analyze_latest_drive",
-      description: "Analyze the most recent drive with comprehensive metrics including duration, battery consumption, FSD usage, and drive merging for stops <7 minutes",
-      parameters: {
-        type: "object",
-        properties: {
-          vin: {
-            type: "string",
-            description: "Vehicle identification number (VIN)"
-          },
-          days_back: {
-            type: "number",
-            description: "Number of days to look back for recent drives",
-            default: 7
-          }
-        },
-        required: ["vin"]
+    server.tool(
+      "analyze_latest_drive",
+      "Analyze the most recent drive with comprehensive metrics including duration, battery consumption, FSD usage, and drive merging for stops <7 minutes",
+      {
+        vin: z.string().describe("Vehicle identification number (VIN)"),
+        days_back: z.number().optional().default(7).describe("Number of days to look back for recent drives")
       },
-      call: async ({ vin, days_back = 7 }) => {
+      async ({ vin, days_back = 7 }) => {
         try {
           // Calculate date range for recent drives
           const endDate = new Date();
@@ -311,17 +259,14 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
           throw new Error(`Failed to analyze latest drive: ${error}`);
         }
       }
-    });
+    );
 
     // Register get_vehicles tool
-    server.addTool({
-      name: "get_vehicles",
-      description: "List all vehicles in the Tessie account",
-      parameters: {
-        type: "object",
-        properties: {}
-      },
-      call: async () => {
+    server.tool(
+      "get_vehicles",
+      "List all vehicles in the Tessie account",
+      {},
+      async () => {
         try {
           const vehicles = await tessieClient.getVehicles();
           return {
@@ -335,27 +280,17 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
           throw new Error(`Failed to get vehicles: ${error}`);
         }
       }
-    });
+    );
 
     // Register natural_language_query tool
-    server.addTool({
-      name: "natural_language_query",
-      description: "Process natural language queries about your vehicle data (e.g., \"How many miles did I drive last week?\")",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "Natural language query about vehicle data"
-          },
-          vin: {
-            type: "string",
-            description: "Vehicle identification number (VIN) - optional if only one vehicle"
-          }
-        },
-        required: ["query"]
+    server.tool(
+      "natural_language_query",
+      "Process natural language queries about your vehicle data (e.g., \"How many miles did I drive last week?\")",
+      {
+        query: z.string().describe("Natural language query about vehicle data"),
+        vin: z.string().optional().describe("Vehicle identification number (VIN) - optional if only one vehicle")
       },
-      call: async ({ query, vin }) => {
+      async ({ query, vin }) => {
         try {
           // Parse the natural language query
           const parsed = queryOptimizer.parseNaturalLanguage(query);
@@ -456,7 +391,7 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
           throw new Error(`Failed to process natural language query: ${error}`);
         }
       }
-    });
+    );
 
     // Return the server object (Smithery CLI handles transport)
     return server.server;
