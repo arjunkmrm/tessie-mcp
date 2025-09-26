@@ -34,7 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.configSchema = void 0;
+exports.parameterSchema = exports.configSchema = void 0;
 exports.default = createServer;
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
@@ -45,6 +45,10 @@ const tessie_client_js_1 = require("./tessie-client.js");
 const zod_1 = require("zod");
 exports.configSchema = zod_1.z.object({
     tessie_api_token: zod_1.z.string().describe("Tessie API token for accessing vehicle data"),
+});
+// Define parameter schema for URL-based configuration
+exports.parameterSchema = zod_1.z.object({
+    tessie_api_token: zod_1.z.string().optional().describe("Tessie API token for accessing vehicle data"),
 });
 class TessieMcpServer {
     constructor(config) {
@@ -180,12 +184,12 @@ class TessieMcpServer {
             const { name, arguments: args } = request.params;
             try {
                 if (!this.tessieClient) {
-                    // Try config first, then environment variables as fallback
+                    // Try config first, then URL parameters, then environment variables as fallback
                     const accessToken = this.config?.tessie_api_token ||
                         process.env.tessie_api_token ||
                         process.env.TESSIE_ACCESS_TOKEN;
                     if (!accessToken) {
-                        throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidRequest, 'Tessie API token is required. Please configure it in the server settings or set TESSIE_ACCESS_TOKEN environment variable.');
+                        throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidRequest, 'Tessie API token is required. Please add tessie_api_token to your MCP server URL like: your-server-url?tessie_api_token=your_token_here');
                     }
                     this.tessieClient = new tessie_client_js_1.TessieClient(accessToken);
                 }

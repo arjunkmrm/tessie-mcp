@@ -18,6 +18,11 @@ export const configSchema = z.object({
   tessie_api_token: z.string().describe("Tessie API token for accessing vehicle data"),
 });
 
+// Define parameter schema for URL-based configuration
+export const parameterSchema = z.object({
+  tessie_api_token: z.string().optional().describe("Tessie API token for accessing vehicle data"),
+});
+
 class TessieMcpServer {
   private server: Server;
   private tessieClient: TessieClient | null = null;
@@ -162,14 +167,14 @@ class TessieMcpServer {
 
       try {
         if (!this.tessieClient) {
-          // Try config first, then environment variables as fallback
+          // Try config first, then URL parameters, then environment variables as fallback
           const accessToken = this.config?.tessie_api_token ||
                              process.env.tessie_api_token ||
                              process.env.TESSIE_ACCESS_TOKEN;
           if (!accessToken) {
             throw new McpError(
               ErrorCode.InvalidRequest,
-              'Tessie API token is required. Please configure it in the server settings or set TESSIE_ACCESS_TOKEN environment variable.'
+              'Tessie API token is required. Please add tessie_api_token to your MCP server URL like: your-server-url?tessie_api_token=your_token_here'
             );
           }
           this.tessieClient = new TessieClient(accessToken);
