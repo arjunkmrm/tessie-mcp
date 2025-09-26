@@ -47,10 +47,8 @@ const drive_analyzer_js_1 = require("./drive-analyzer.js");
 const zod_1 = require("zod");
 // Configuration schema - automatically detected by Smithery
 exports.configSchema = zod_1.z.object({
-    tessie_api_token: zod_1.z.string()
-        .min(1)
-        .describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
-}).describe("Tessie Vehicle Data Configuration");
+    tessie_api_token: zod_1.z.string().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
+});
 // Define parameter schema for URL-based configuration
 exports.parameterSchema = zod_1.z.object({
     tessie_api_token: zod_1.z.string().optional().describe("Tessie API token for accessing vehicle data"),

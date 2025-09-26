@@ -1,664 +1,272 @@
 #!/usr/bin/env node
-
-import * as dotenv from 'dotenv';
-dotenv.config();
-
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  ErrorCode,
-  ListToolsRequestSchema,
-  McpError,
-} from '@modelcontextprotocol/sdk/types.js';
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { z } from "zod";
 import { TessieClient } from './tessie-client.js';
 import { TessieQueryOptimizer } from './query-optimizer.js';
 import { DriveAnalyzer } from './drive-analyzer.js';
-import { z } from 'zod';
 
 // Configuration schema - automatically detected by Smithery
 export const configSchema = z.object({
-  tessie_api_token: z.string()
-    .min(1)
-    .describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
-}).describe("Tessie Vehicle Data Configuration");
-
-// Define parameter schema for URL-based configuration
-export const parameterSchema = z.object({
-  tessie_api_token: z.string().optional().describe("Tessie API token for accessing vehicle data"),
+  tessie_api_token: z.string().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
 });
 
-class TessieMcpServer {
-  private server: Server;
-  private tessieClient: TessieClient | null = null;
-  private config: z.infer<typeof configSchema> | null = null;
-  private queryOptimizer: TessieQueryOptimizer;
-  private driveAnalyzer: DriveAnalyzer;
+// Export stateless flag for MCP
+export const stateless = true;
 
-  constructor(config?: z.infer<typeof configSchema>) {
-    this.config = config || null;
-    this.queryOptimizer = new TessieQueryOptimizer();
-    this.driveAnalyzer = new DriveAnalyzer();
-    this.server = new Server(
-      {
-        name: 'tessie-mcp-server',
-        version: '1.0.0',
-      },
-      {
-        capabilities: {
-          tools: {},
-        },
-      }
-    );
+/**
+ * Tessie Vehicle Data MCP Server
+ *
+ * This MCP server integrates with Tessie API to provide Tesla vehicle data access.
+ * Features include real-time vehicle state, driving history, mileage tracking,
+ * natural language queries, and comprehensive drive analysis with merging.
+ */
 
-    this.setupToolHandlers();
-    this.setupErrorHandling();
-  }
-
-  private setupErrorHandling(): void {
-    this.server.onerror = (error) => console.error('[MCP Error]', error);
-    process.on('SIGINT', async () => {
-      await this.server.close();
-      process.exit(0);
+export default function ({ config }: { config: z.infer<typeof configSchema> }) {
+  try {
+    // Create MCP server
+    const server = new McpServer({
+      name: "tessie-mcp-server",
+      version: "1.0.0"
     });
-  }
 
-  private setupToolHandlers(): void {
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: [
-        {
-          name: 'get_vehicle_current_state',
-          description: 'Get the current state of a vehicle including location, battery level, odometer reading',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              vin: {
-                type: 'string',
-                description: 'Vehicle identification number (VIN)',
-              },
-              use_cache: {
-                type: 'boolean',
-                description: 'Whether to use cached data to avoid waking the vehicle',
-                default: true,
-              },
-            },
-            required: ['vin'],
-          },
-        },
-        {
-          name: 'get_driving_history',
-          description: 'Get driving history for a vehicle within a date range',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              vin: {
-                type: 'string',
-                description: 'Vehicle identification number (VIN)',
-              },
-              start_date: {
-                type: 'string',
-                description: 'Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)',
-              },
-              end_date: {
-                type: 'string',
-                description: 'End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)',
-              },
-              limit: {
-                type: 'number',
-                description: 'Maximum number of drives to return',
-                default: 50,
-              },
-            },
-            required: ['vin'],
-          },
-        },
-        {
-          name: 'get_mileage_at_location',
-          description: 'Find drives to a specific location and return mileage information',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              vin: {
-                type: 'string',
-                description: 'Vehicle identification number (VIN)',
-              },
-              location: {
-                type: 'string',
-                description: 'Location name or address to search for',
-              },
-              start_date: {
-                type: 'string',
-                description: 'Start date to search from (ISO format)',
-              },
-              end_date: {
-                type: 'string',
-                description: 'End date to search until (ISO format)',
-              },
-            },
-            required: ['vin', 'location'],
-          },
-        },
-        {
-          name: 'get_weekly_mileage',
-          description: 'Calculate total miles driven in a specific week or time period',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              vin: {
-                type: 'string',
-                description: 'Vehicle identification number (VIN)',
-              },
-              start_date: {
-                type: 'string',
-                description: 'Start date of the period (ISO format)',
-              },
-              end_date: {
-                type: 'string',
-                description: 'End date of the period (ISO format)',
-              },
-            },
-            required: ['vin', 'start_date', 'end_date'],
-          },
-        },
-        {
-          name: 'get_vehicles',
-          description: 'List all vehicles in the Tessie account',
-          inputSchema: {
-            type: 'object',
-            properties: {},
-          },
-        },
-        {
-          name: 'natural_language_query',
-          description: 'Process natural language queries about your vehicle data (e.g., "How many miles did I drive last week?")',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              query: {
-                type: 'string',
-                description: 'Natural language query about vehicle data',
-              },
-              vin: {
-                type: 'string',
-                description: 'Vehicle identification number (VIN) - optional if only one vehicle',
-              },
-            },
-            required: ['query'],
-          },
-        },
-        {
-          name: 'analyze_latest_drive',
-          description: 'Analyze the most recent drive with comprehensive metrics including duration, battery consumption, FSD usage, and drive merging for stops <7 minutes',
-          inputSchema: {
-            type: 'object',
-            properties: {
-              vin: {
-                type: 'string',
-                description: 'Vehicle identification number (VIN)',
-              },
-              days_back: {
-                type: 'number',
-                description: 'Number of days to look back for recent drives',
-                default: 7,
-              },
-            },
-            required: ['vin'],
-          },
-        },
-      ],
-    }));
+    // Initialize clients
+    const tessieClient = new TessieClient(config.tessie_api_token);
+    const queryOptimizer = new TessieQueryOptimizer();
+    const driveAnalyzer = new DriveAnalyzer();
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
-      const { name, arguments: args } = request.params;
-
-      try {
-        if (!this.tessieClient) {
-          // Try config first, then URL parameters, then environment variables as fallback
-          const accessToken = this.config?.tessie_api_token ||
-                             process.env.tessie_api_token ||
-                             process.env.TESSIE_ACCESS_TOKEN;
-          if (!accessToken) {
-            throw new McpError(
-              ErrorCode.InvalidRequest,
-              'Tessie API token is required. Please configure tessie_api_token in the server settings or add it to your MCP server URL. Get your token from https://my.tessie.com/settings/api'
-            );
+    // Register get_vehicle_current_state tool
+    server.addTool({
+      name: "get_vehicle_current_state",
+      description: "Get the current state of a vehicle including location, battery level, odometer reading",
+      parameters: {
+        type: "object",
+        properties: {
+          vin: {
+            type: "string",
+            description: "Vehicle identification number (VIN)"
+          },
+          use_cache: {
+            type: "boolean",
+            description: "Whether to use cached data to avoid waking the vehicle",
+            default: true
           }
-          this.tessieClient = new TessieClient(accessToken);
-        }
-
-        switch (name) {
-          case 'get_vehicle_current_state':
-            return await this.handleGetVehicleCurrentState(args);
-
-          case 'get_driving_history':
-            return await this.handleGetDrivingHistory(args);
-
-          case 'get_mileage_at_location':
-            return await this.handleGetMileageAtLocation(args);
-
-          case 'get_weekly_mileage':
-            return await this.handleGetWeeklyMileage(args);
-
-          case 'get_vehicles':
-            return await this.handleGetVehicles();
-
-          case 'natural_language_query':
-            return await this.handleNaturalLanguageQuery(args);
-
-          case 'analyze_latest_drive':
-            return await this.handleAnalyzeLatestDrive(args);
-
-          default:
-            throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
-        }
-      } catch (error) {
-        if (error instanceof McpError) {
-          throw error;
-        }
-        throw new McpError(ErrorCode.InternalError, `Tool execution failed: ${error}`);
-      }
-    });
-  }
-
-  private async handleGetVehicleCurrentState(args: any) {
-    const { vin, use_cache = true } = args;
-    const state = await this.tessieClient!.getVehicleState(vin, use_cache);
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
+        },
+        required: ["vin"]
+      },
+      call: async ({ vin, use_cache = true }) => {
+        try {
+          const state = await tessieClient.getVehicleState(vin, use_cache);
+          return {
             vehicle: state.display_name,
             vin: state.vin,
             current_location: {
               latitude: state.latitude,
               longitude: state.longitude,
             },
-            odometer: state.odometer,
-            battery_level: state.battery_level,
-            charging_state: state.charging_state,
-            locked: state.locked,
-            climate_on: state.climate_on,
-            inside_temp: state.inside_temp,
-            outside_temp: state.outside_temp,
+            battery: {
+              level: state.battery_level,
+              range: state.est_battery_range,
+              charging_state: state.charging_state,
+              time_to_full_charge: state.time_to_full_charge,
+            },
+            vehicle_state: {
+              locked: state.locked,
+              sentry_mode: state.sentry_mode,
+              odometer: state.odometer,
+            },
+            climate: {
+              inside_temp: state.inside_temp,
+              outside_temp: state.outside_temp,
+              climate_on: state.climate_on,
+            },
             last_updated: state.since,
-          }, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async handleGetDrivingHistory(args: any) {
-    const { vin, start_date, end_date, limit = 50 } = args;
-    const drives = await this.tessieClient!.getDrives(vin, start_date, end_date, limit);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            total_drives: drives.length,
-            total_distance_miles: drives.reduce((sum, drive) => sum + drive.odometer_distance, 0),
-            drives: drives.map(drive => ({
-              id: drive.id,
-              date: new Date(drive.started_at * 1000).toISOString(),
-              from: {
-                address: drive.starting_location,
-                saved_location: drive.starting_saved_location,
-                odometer: drive.starting_odometer,
-              },
-              to: {
-                address: drive.ending_location,
-                saved_location: drive.ending_saved_location,
-                odometer: drive.ending_odometer,
-              },
-              distance_miles: drive.odometer_distance,
-              duration_minutes: Math.round((drive.ended_at - drive.started_at) / 60),
-              battery_used: drive.starting_battery - drive.ending_battery,
-              autopilot_miles: drive.autopilot_distance,
-              fsd_available: drive.autopilot_distance !== null && drive.autopilot_distance !== undefined,
-            })),
-          }, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async handleGetMileageAtLocation(args: any) {
-    const { vin, location, start_date, end_date } = args;
-    const drives = await this.tessieClient!.getDrives(vin, start_date, end_date);
-
-    const locationLower = location.toLowerCase();
-    const matchingDrives = drives.filter(drive =>
-      drive.starting_location.toLowerCase().includes(locationLower) ||
-      drive.ending_location.toLowerCase().includes(locationLower) ||
-      (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower)) ||
-      (drive.ending_saved_location && drive.ending_saved_location.toLowerCase().includes(locationLower))
-    );
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            location_searched: location,
-            matching_drives: matchingDrives.length,
-            drives: matchingDrives.map(drive => ({
-              date: new Date(drive.started_at * 1000).toISOString(),
-              odometer_at_arrival: drive.starting_location.toLowerCase().includes(locationLower) ||
-                                  (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower))
-                                  ? drive.starting_odometer
-                                  : drive.ending_odometer,
-              location_matched: drive.starting_location.toLowerCase().includes(locationLower) ||
-                               (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower))
-                               ? drive.starting_location
-                               : drive.ending_location,
-              saved_location: drive.starting_location.toLowerCase().includes(locationLower) ||
-                             (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower))
-                             ? drive.starting_saved_location
-                             : drive.ending_saved_location,
-            })),
-          }, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async handleGetWeeklyMileage(args: any) {
-    const { vin, start_date, end_date } = args;
-    const drives = await this.tessieClient!.getDrives(vin, start_date, end_date);
-
-    const totalMiles = drives.reduce((sum, drive) => sum + drive.odometer_distance, 0);
-    const totalDuration = drives.reduce((sum, drive) => sum + Math.round((drive.ended_at - drive.started_at) / 60), 0);
-    const totalAutopilotMiles = drives.reduce((sum, drive) => sum + (drive.autopilot_distance || 0), 0);
-    const drivesWithFSD = drives.filter(drive => drive.autopilot_distance && drive.autopilot_distance > 0);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            period: {
-              start: start_date,
-              end: end_date,
-            },
-            total_miles_driven: Math.round(totalMiles * 100) / 100,
-            total_drives: drives.length,
-            total_drive_time_hours: Math.round((totalDuration / 60) * 100) / 100,
-            average_miles_per_drive: drives.length > 0 ? Math.round((totalMiles / drives.length) * 100) / 100 : 0,
-            fsd_analysis: {
-              total_autopilot_miles: Math.round(totalAutopilotMiles * 100) / 100,
-              fsd_percentage: totalMiles > 0 ? Math.round((totalAutopilotMiles / totalMiles) * 10000) / 100 : 0,
-              drives_with_fsd: drivesWithFSD.length,
-              fsd_data_available: drives.some(drive => drive.autopilot_distance !== null && drive.autopilot_distance !== undefined),
-              note: totalAutopilotMiles === 0 ? "FSD data may not be available or no FSD usage detected" : undefined
-            },
-            daily_breakdown: this.groupDrivesByDay(drives),
-          }, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async handleGetVehicles() {
-    const vehicles = await this.tessieClient!.getVehicles();
-    
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
-            vehicles: vehicles,
-            count: vehicles.length,
-          }, null, 2),
-        },
-      ],
-    };
-  }
-
-  private async handleNaturalLanguageQuery(args: any) {
-    const { query, vin } = args;
-
-    // First, try to parse the natural language query
-    const parsedQuery = this.queryOptimizer.parseNaturalLanguage(query);
-
-    if (parsedQuery.confidence < 0.5) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: 'Unable to understand the query',
-              suggestions: [
-                'Try asking about weekly mileage: "How many miles did I drive last week?"',
-                'Ask about driving history: "Show me my recent trips"',
-                'Check current status: "What is my car\'s current state?"',
-                'List vehicles: "Show me all my vehicles"'
-              ],
-              confidence: parsedQuery.confidence,
-              query_analysis: {
-                original_query: query,
-                detected_patterns: this.analyzeQueryPatterns(query),
-              }
-            }, null, 2),
-          },
-        ],
-      };
-    }
-
-    // Analyze and optimize the query
-    const optimization = this.queryOptimizer.optimizeForMCP(parsedQuery.operation, parsedQuery.parameters);
-    const metrics = this.queryOptimizer.analyzeQuery(parsedQuery.operation, optimization.optimizedParameters || parsedQuery.parameters);
-
-    // If no VIN provided and we need one, try to get the first vehicle
-    let targetVin = vin;
-    if (!targetVin && parsedQuery.operation !== 'get_vehicles') {
-      const vehicles = await this.tessieClient!.getVehicles();
-      if (vehicles.length === 0) {
-        return {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify({
-                error: 'No vehicles found in your Tessie account',
-              }, null, 2),
-            },
-          ],
-        };
-      }
-      targetVin = vehicles[0].vin;
-    }
-
-    // Use optimized parameters if available
-    const finalParams = { ...optimization.optimizedParameters || parsedQuery.parameters };
-    if (targetVin && parsedQuery.operation !== 'get_vehicles') {
-      finalParams.vin = targetVin;
-    }
-
-    // Execute the parsed operation
-    try {
-      let result;
-      switch (parsedQuery.operation) {
-        case 'get_weekly_mileage':
-          result = await this.handleGetWeeklyMileage(finalParams);
-          break;
-        case 'get_driving_history':
-          result = await this.handleGetDrivingHistory(finalParams);
-          break;
-        case 'get_vehicle_current_state':
-          result = await this.handleGetVehicleCurrentState(finalParams);
-          break;
-        case 'get_vehicles':
-          result = await this.handleGetVehicles();
-          break;
-        default:
-          return {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify({
-                  error: 'Unsupported operation',
-                  operation: parsedQuery.operation,
-                  confidence: parsedQuery.confidence,
-                }, null, 2),
-              },
-            ],
           };
+        } catch (error) {
+          throw new Error(`Failed to get vehicle state: ${error}`);
+        }
       }
-
-      // Enhance result with optimization metadata
-      const enhancedResult = this.enhanceResultWithMetadata(result, {
-        original_query: query,
-        parsed_operation: parsedQuery.operation,
-        confidence: parsedQuery.confidence,
-        optimization: optimization,
-        metrics: metrics,
-        parameters_used: finalParams
-      });
-
-      return enhancedResult;
-
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
-              error: 'Failed to execute query',
-              details: error instanceof Error ? error.message : 'Unknown error',
-              original_query: query,
-              parsed_operation: parsedQuery.operation,
-              parameters: finalParams,
-              optimization_applied: optimization.isOptimized,
-              recommendations: optimization.recommendations,
-            }, null, 2),
-          },
-        ],
-      };
-    }
-  }
-
-  private analyzeQueryPatterns(query: string): string[] {
-    const patterns = [];
-    const lowerQuery = query.toLowerCase();
-
-    if (lowerQuery.includes('week')) patterns.push('temporal_weekly');
-    if (lowerQuery.includes('month')) patterns.push('temporal_monthly');
-    if (lowerQuery.includes('mile') || lowerQuery.includes('driv')) patterns.push('distance_related');
-    if (lowerQuery.includes('last') || lowerQuery.includes('previous')) patterns.push('historical');
-    if (lowerQuery.includes('break') || lowerQuery.includes('basis')) patterns.push('breakdown_requested');
-    if (lowerQuery.includes('current') || lowerQuery.includes('now')) patterns.push('current_state');
-
-    return patterns;
-  }
-
-  private enhanceResultWithMetadata(result: any, metadata: any): any {
-    const originalData = JSON.parse(result.content[0].text);
-
-    const enhancedData = {
-      ...originalData,
-      query_metadata: {
-        natural_language_query: metadata.original_query,
-        operation: metadata.parsed_operation,
-        confidence: metadata.confidence,
-        optimization_applied: metadata.optimization.isOptimized,
-        performance_metrics: {
-          estimated_response_size_kb: metadata.metrics.estimatedResponseSize,
-          complexity_score: metadata.metrics.complexity,
-          api_calls_required: metadata.metrics.apiCallsRequired,
-        },
-        recommendations: metadata.optimization.recommendations.length > 0 ? metadata.optimization.recommendations : undefined,
-        parameters_used: metadata.parameters_used,
-      }
-    };
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify(enhancedData, null, 2),
-        },
-      ],
-    };
-  }
-
-  private groupDrivesByDay(drives: any[]) {
-    const dailyStats: { [key: string]: { miles: number; drives: number; autopilot_miles: number } } = {};
-
-    drives.forEach(drive => {
-      const date = new Date(drive.started_at * 1000).toISOString().split('T')[0]; // Get YYYY-MM-DD
-      if (!dailyStats[date]) {
-        dailyStats[date] = { miles: 0, drives: 0, autopilot_miles: 0 };
-      }
-      dailyStats[date].miles += drive.odometer_distance;
-      dailyStats[date].drives += 1;
-      dailyStats[date].autopilot_miles += drive.autopilot_distance || 0;
     });
 
-    return Object.entries(dailyStats).map(([date, stats]) => ({
-      date,
-      miles: Math.round(stats.miles * 100) / 100,
-      drives: stats.drives,
-      autopilot_miles: Math.round(stats.autopilot_miles * 100) / 100,
-      fsd_percentage: stats.miles > 0 ? Math.round((stats.autopilot_miles / stats.miles) * 10000) / 100 : 0,
-    }));
-  }
+    // Register get_driving_history tool
+    server.addTool({
+      name: "get_driving_history",
+      description: "Get driving history for a vehicle within a date range",
+      parameters: {
+        type: "object",
+        properties: {
+          vin: {
+            type: "string",
+            description: "Vehicle identification number (VIN)"
+          },
+          start_date: {
+            type: "string",
+            description: "Start date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)"
+          },
+          end_date: {
+            type: "string",
+            description: "End date in ISO format (YYYY-MM-DD or YYYY-MM-DDTHH:mm:ssZ)"
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of drives to return",
+            default: 50
+          }
+        },
+        required: ["vin"]
+      },
+      call: async ({ vin, start_date, end_date, limit = 50 }) => {
+        try {
+          const drives = await tessieClient.getDrives(vin, start_date, end_date, limit);
+          return {
+            vehicle_vin: vin,
+            total_drives: drives.length,
+            date_range: {
+              start: start_date || 'Not specified',
+              end: end_date || 'Not specified'
+            },
+            drives: drives.map(drive => ({
+              id: drive.id,
+              start_time: new Date(drive.started_at * 1000).toISOString(),
+              end_time: new Date(drive.ended_at * 1000).toISOString(),
+              starting_location: drive.starting_location,
+              ending_location: drive.ending_location,
+              distance_miles: drive.odometer_distance,
+              duration_minutes: Math.round(((drive.ended_at - drive.started_at) / 60) * 100) / 100,
+              starting_battery: drive.starting_battery,
+              ending_battery: drive.ending_battery,
+              battery_used: drive.starting_battery - drive.ending_battery,
+              average_speed: drive.average_speed,
+              max_speed: drive.max_speed,
+              autopilot_distance: drive.autopilot_distance || 0,
+            }))
+          };
+        } catch (error) {
+          throw new Error(`Failed to get driving history: ${error}`);
+        }
+      }
+    });
 
-  private async handleAnalyzeLatestDrive(args: any) {
-    const { vin, days_back = 7 } = args;
+    // Register get_weekly_mileage tool
+    server.addTool({
+      name: "get_weekly_mileage",
+      description: "Calculate total miles driven in a specific week or time period",
+      parameters: {
+        type: "object",
+        properties: {
+          vin: {
+            type: "string",
+            description: "Vehicle identification number (VIN)"
+          },
+          start_date: {
+            type: "string",
+            description: "Start date of the period (ISO format)"
+          },
+          end_date: {
+            type: "string",
+            description: "End date of the period (ISO format)"
+          }
+        },
+        required: ["vin", "start_date", "end_date"]
+      },
+      call: async ({ vin, start_date, end_date }) => {
+        try {
+          const drives = await tessieClient.getDrives(vin, start_date, end_date, 500);
 
-    // Calculate date range for recent drives
-    const endDate = new Date();
-    const startDate = new Date();
-    startDate.setDate(startDate.getDate() - days_back);
+          const totalMiles = drives.reduce((sum, drive) => sum + drive.odometer_distance, 0);
+          const totalAutopilotMiles = drives.reduce((sum, drive) => sum + (drive.autopilot_distance || 0), 0);
 
-    // Get recent drives
-    const drives = await this.tessieClient!.getDrives(
-      vin,
-      startDate.toISOString(),
-      endDate.toISOString(),
-      100 // Get more drives to ensure we have recent ones
-    );
+          // Group drives by day for weekly breakdown
+          const dailyStats: { [key: string]: { miles: number; drives: number; autopilot_miles: number } } = {};
 
-    if (drives.length === 0) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
+          drives.forEach(drive => {
+            const date = new Date(drive.started_at * 1000).toISOString().split('T')[0];
+            if (!dailyStats[date]) {
+              dailyStats[date] = { miles: 0, drives: 0, autopilot_miles: 0 };
+            }
+            dailyStats[date].miles += drive.odometer_distance;
+            dailyStats[date].drives += 1;
+            dailyStats[date].autopilot_miles += drive.autopilot_distance || 0;
+          });
+
+          const breakdown = Object.entries(dailyStats).map(([date, stats]) => ({
+            date,
+            miles: Math.round(stats.miles * 100) / 100,
+            drives: stats.drives,
+            autopilot_miles: Math.round(stats.autopilot_miles * 100) / 100,
+            fsd_percentage: stats.miles > 0 ? Math.round((stats.autopilot_miles / stats.miles) * 10000) / 100 : 0,
+          }));
+
+          return {
+            vehicle_vin: vin,
+            period: { start_date, end_date },
+            summary: {
+              total_miles: Math.round(totalMiles * 100) / 100,
+              total_drives: drives.length,
+              total_autopilot_miles: Math.round(totalAutopilotMiles * 100) / 100,
+              fsd_percentage: totalMiles > 0 ? Math.round((totalAutopilotMiles / totalMiles) * 10000) / 100 : 0,
+            },
+            daily_breakdown: breakdown.sort((a, b) => a.date.localeCompare(b.date))
+          };
+        } catch (error) {
+          throw new Error(`Failed to get weekly mileage: ${error}`);
+        }
+      }
+    });
+
+    // Register analyze_latest_drive tool
+    server.addTool({
+      name: "analyze_latest_drive",
+      description: "Analyze the most recent drive with comprehensive metrics including duration, battery consumption, FSD usage, and drive merging for stops <7 minutes",
+      parameters: {
+        type: "object",
+        properties: {
+          vin: {
+            type: "string",
+            description: "Vehicle identification number (VIN)"
+          },
+          days_back: {
+            type: "number",
+            description: "Number of days to look back for recent drives",
+            default: 7
+          }
+        },
+        required: ["vin"]
+      },
+      call: async ({ vin, days_back = 7 }) => {
+        try {
+          // Calculate date range for recent drives
+          const endDate = new Date();
+          const startDate = new Date();
+          startDate.setDate(startDate.getDate() - days_back);
+
+          // Get recent drives
+          const drives = await tessieClient.getDrives(
+            vin,
+            startDate.toISOString(),
+            endDate.toISOString(),
+            100
+          );
+
+          if (drives.length === 0) {
+            return {
               error: 'No drives found in the specified time period',
               period: `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`,
               suggestion: 'Try increasing days_back or check if the vehicle has been driven recently'
-            }, null, 2)
+            };
           }
-        ]
-      };
-    }
 
-    // Analyze the latest drive
-    const analysis = this.driveAnalyzer.analyzeLatestDrive(drives);
+          // Analyze the latest drive
+          const analysis = driveAnalyzer.analyzeLatestDrive(drives);
 
-    if (!analysis) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify({
+          if (!analysis) {
+            return {
               error: 'Could not analyze drives',
               drives_found: drives.length,
               suggestion: 'Drives may be incomplete or missing required data'
-            }, null, 2)
+            };
           }
-        ]
-      };
-    }
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({
+          return {
             analysis_summary: analysis.summary,
             detailed_analysis: {
               drive_details: {
@@ -698,31 +306,162 @@ class TessieMcpServer {
               drives_analyzed: drives.length,
               period_searched: `${startDate.toISOString().split('T')[0]} to ${endDate.toISOString().split('T')[0]}`
             }
-          }, null, 2)
+          };
+        } catch (error) {
+          throw new Error(`Failed to analyze latest drive: ${error}`);
         }
-      ]
-    };
+      }
+    });
+
+    // Register get_vehicles tool
+    server.addTool({
+      name: "get_vehicles",
+      description: "List all vehicles in the Tessie account",
+      parameters: {
+        type: "object",
+        properties: {}
+      },
+      call: async () => {
+        try {
+          const vehicles = await tessieClient.getVehicles();
+          return {
+            total_vehicles: vehicles.length,
+            vehicles: vehicles.map(vehicle => ({
+              vin: vehicle.vin,
+              display_name: vehicle.display_name
+            }))
+          };
+        } catch (error) {
+          throw new Error(`Failed to get vehicles: ${error}`);
+        }
+      }
+    });
+
+    // Register natural_language_query tool
+    server.addTool({
+      name: "natural_language_query",
+      description: "Process natural language queries about your vehicle data (e.g., \"How many miles did I drive last week?\")",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Natural language query about vehicle data"
+          },
+          vin: {
+            type: "string",
+            description: "Vehicle identification number (VIN) - optional if only one vehicle"
+          }
+        },
+        required: ["query"]
+      },
+      call: async ({ query, vin }) => {
+        try {
+          // Parse the natural language query
+          const parsed = queryOptimizer.parseNaturalLanguage(query);
+
+          if (parsed.confidence < 0.5) {
+            return {
+              error: "Could not understand the query",
+              confidence: parsed.confidence,
+              suggestions: [
+                "Try queries like: 'How many miles did I drive last week?'",
+                "Or: 'What's my current battery level?'",
+                "Or: 'Analyze my latest drive'"
+              ]
+            };
+          }
+
+          // If no VIN provided, try to get the first vehicle
+          let targetVin = vin;
+          if (!targetVin) {
+            const vehicles = await tessieClient.getVehicles();
+            if (vehicles.length === 0) {
+              throw new Error("No vehicles found in account");
+            }
+            targetVin = vehicles[0].vin;
+          }
+
+          // Execute the appropriate tool based on parsed operation
+          switch (parsed.operation) {
+            case 'get_vehicle_current_state':
+              const state = await tessieClient.getVehicleState(targetVin, true);
+              return {
+                query_understood: query,
+                confidence: parsed.confidence,
+                result: {
+                  vehicle: state.display_name,
+                  battery_level: state.battery_level,
+                  location: { latitude: state.latitude, longitude: state.longitude },
+                  locked: state.locked,
+                  odometer: state.odometer
+                }
+              };
+
+            case 'get_weekly_mileage':
+            case 'get_driving_history':
+              const drives = await tessieClient.getDrives(
+                targetVin,
+                parsed.parameters.start_date,
+                parsed.parameters.end_date,
+                50
+              );
+              const totalMiles = drives.reduce((sum, drive) => sum + drive.odometer_distance, 0);
+              return {
+                query_understood: query,
+                confidence: parsed.confidence,
+                result: {
+                  total_miles: Math.round(totalMiles * 100) / 100,
+                  total_drives: drives.length,
+                  period: {
+                    start: parsed.parameters.start_date,
+                    end: parsed.parameters.end_date
+                  }
+                }
+              };
+
+            case 'analyze_latest_drive':
+              const endDate = new Date();
+              const startDate = new Date();
+              startDate.setDate(startDate.getDate() - (parsed.parameters.days_back || 7));
+
+              const recentDrives = await tessieClient.getDrives(
+                targetVin,
+                startDate.toISOString(),
+                endDate.toISOString(),
+                100
+              );
+
+              const analysis = driveAnalyzer.analyzeLatestDrive(recentDrives);
+              return {
+                query_understood: query,
+                confidence: parsed.confidence,
+                result: analysis ? {
+                  summary: analysis.summary,
+                  drive_distance: analysis.mergedDrive.total_distance,
+                  battery_used: analysis.batteryConsumption.percentage_used,
+                  fsd_miles: analysis.fsdAnalysis.total_autopilot_miles
+                } : { error: "No recent drives found" }
+              };
+
+            default:
+              return {
+                query_understood: query,
+                confidence: parsed.confidence,
+                error: "Query understood but operation not yet implemented",
+                parsed_operation: parsed.operation
+              };
+          }
+        } catch (error) {
+          throw new Error(`Failed to process natural language query: ${error}`);
+        }
+      }
+    });
+
+    // Return the server object (Smithery CLI handles transport)
+    return server.server;
+
+  } catch (error) {
+    throw new Error(`Server initialization error: ${error instanceof Error ? error.message : String(error)}`);
   }
-
-  async run(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    console.error('Tessie MCP server running on stdio');
-  }
-
-  getServer(): Server {
-    return this.server;
-  }
-}
-
-// Traditional MCP server run (for local usage)
-if (require.main === module) {
-  const server = new TessieMcpServer();
-  server.run().catch(console.error);
-}
-
-// Smithery-compliant export
-export default function createServer({ config }: { config: z.infer<typeof configSchema> }) {
-  const serverInstance = new TessieMcpServer(config);
-  return serverInstance.getServer();
 }

@@ -16,7 +16,7 @@ export declare const parameterSchema: z.ZodObject<{
     tessie_api_token?: string | undefined;
 }>;
 export default function createServer({ config }: {
-    config: z.infer<typeof configSchema>;
+    config?: z.infer<typeof configSchema>;
 }): Server<{
     method: string;
     params?: {

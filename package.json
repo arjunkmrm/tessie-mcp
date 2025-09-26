@@ -1,16 +1,23 @@
 {
   "name": "tessie-mcp-server",
   "version": "1.0.0",
-  "description": "MCP server for Tessie API vehicle data queries",
-  "main": "dist/index.js",
-  "module": "dist/index.js",
+  "description": "MCP server for Tessie API vehicle data queries with drive analysis and natural language processing",
+  "type": "module",
+  "module": "./src/index.ts",
+  "bin": {
+    "tessie-mcp-server": "./.smithery/index.cjs"
+  },
+  "files": [
+    ".smithery"
+  ],
   "scripts": {
-    "build": "tsc",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
+    "build": "npm run build:shttp",
+    "build:stdio": "npx @smithery/cli build src/index.ts --transport stdio && echo '#!/usr/bin/env node' | cat - .smithery/index.cjs > temp && mv temp .smithery/index.cjs && chmod +x .smithery/index.cjs",
+    "build:shttp": "npx @smithery/cli build src/index.ts --transport shttp",
+    "prepare": "npm run build:stdio",
+    "dev": "npx @smithery/cli dev",
     "test": "jest",
-    "test:watch": "jest --watch",
-    "prepare": "npm run build"
+    "test:watch": "jest --watch"
   },
   "keywords": [
     "mcp",
@@ -36,9 +43,6 @@
     "ts-jest": "^29.4.4",
     "tsx": "^4.0.0",
     "typescript": "^5.0.0"
-  },
-  "bin": {
-    "tessie-mcp-server": "dist/index.js"
   },
   "jest": {
     "preset": "ts-jest",
