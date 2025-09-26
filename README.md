@@ -1,5 +1,7 @@
 # Tessie MCP Extension for Claude Desktop
 
+[![smithery badge](https://smithery.ai/badge/@keithah/tessie-mcp)](https://smithery.ai/server/@keithah/tessie-mcp)
+
 An advanced Tesla analytics platform for Claude Desktop through the [Tessie API](https://tessie.com). This extension provides 39+ tools for comprehensive vehicle data access, advanced analytics, experimental FSD detection, and data export capabilities.
 
 ## Features
@@ -13,6 +15,14 @@ An advanced Tesla analytics platform for Claude Desktop through the [Tessie API]
 - **Secure**: API token stored securely in Claude Desktop configuration
 
 ## Installation
+
+### Installing via Smithery
+
+To install tessie-mcp automatically via [Smithery](https://smithery.ai/server/@keithah/tessie-mcp):
+
+```bash
+npx -y @smithery/cli install @keithah/tessie-mcp
+```
 
 ### Prerequisites
 
