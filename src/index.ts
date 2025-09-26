@@ -385,19 +385,8 @@ if (require.main === module) {
   server.run().catch(console.error);
 }
 
-// Smithery-compliant export (stateless)
-export default function({ config }: { config?: z.infer<typeof configSchema> }) {
-  const server = new TessieMcpServer(config);
-
-  return {
-    async start() {
-      // For Smithery, just return the configured server without connecting to stdio
-      // Smithery will handle the transport layer
-      return server.getServer();
-    },
-
-    async stop() {
-      // Server cleanup if needed
-    }
-  };
+// Smithery-compliant export
+export default function createServer({ config }: { config?: z.infer<typeof configSchema> }) {
+  const serverInstance = new TessieMcpServer(config);
+  return serverInstance.getServer();
 }

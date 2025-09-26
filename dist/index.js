@@ -35,7 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.configSchema = void 0;
-exports.default = default_1;
+exports.default = createServer;
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
 const index_js_1 = require("@modelcontextprotocol/sdk/server/index.js");
@@ -374,18 +374,9 @@ if (require.main === module) {
     const server = new TessieMcpServer();
     server.run().catch(console.error);
 }
-// Smithery-compliant export (stateless)
-function default_1({ config }) {
-    const server = new TessieMcpServer(config);
-    return {
-        async start() {
-            // For Smithery, just return the configured server without connecting to stdio
-            // Smithery will handle the transport layer
-            return server.getServer();
-        },
-        async stop() {
-            // Server cleanup if needed
-        }
-    };
+// Smithery-compliant export
+function createServer({ config }) {
+    const serverInstance = new TessieMcpServer(config);
+    return serverInstance.getServer();
 }
 //# sourceMappingURL=index.js.map

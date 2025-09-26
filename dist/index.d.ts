@@ -8,32 +8,29 @@ export declare const configSchema: z.ZodObject<{
 }, {
     tessie_api_token: string;
 }>;
-export default function ({ config }: {
+export default function createServer({ config }: {
     config?: z.infer<typeof configSchema>;
-}): {
-    start(): Promise<Server<{
-        method: string;
-        params?: {
+}): Server<{
+    method: string;
+    params?: {
+        [x: string]: unknown;
+        _meta?: {
             [x: string]: unknown;
-            _meta?: {
-                [x: string]: unknown;
-                progressToken?: string | number | undefined;
-            } | undefined;
+            progressToken?: string | number | undefined;
         } | undefined;
-    }, {
-        method: string;
-        params?: {
-            [x: string]: unknown;
-            _meta?: {
-                [x: string]: unknown;
-            } | undefined;
-        } | undefined;
-    }, {
+    } | undefined;
+}, {
+    method: string;
+    params?: {
         [x: string]: unknown;
         _meta?: {
             [x: string]: unknown;
         } | undefined;
-    }>>;
-    stop(): Promise<void>;
-};
+    } | undefined;
+}, {
+    [x: string]: unknown;
+    _meta?: {
+        [x: string]: unknown;
+    } | undefined;
+}>;
 //# sourceMappingURL=index.d.ts.map
