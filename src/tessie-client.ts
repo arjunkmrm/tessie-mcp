@@ -35,29 +35,47 @@ export interface TessieVehicleState {
 
 export interface TessieDrive {
   id: number;
-  vin: string;
-  start_date: string;
-  end_date: string;
-  start_latitude: number;
-  start_longitude: number;
-  start_address: string;
+  import_id?: string;
+  started_at: number;
+  ended_at: number;
+  created_at: number;
+  updated_at?: number;
+  starting_location: string;
+  starting_latitude: number;
+  starting_longitude: number;
+  starting_odometer: number;
+  starting_saved_location?: string;
+  ending_location: string;
+  ending_latitude: number;
+  ending_longitude: number;
+  ending_odometer: number;
+  ending_saved_location?: string;
+  starting_battery: number;
+  ending_battery: number;
+  average_inside_temperature?: number;
+  average_outside_temperature?: number;
+  average_speed?: number;
+  max_speed?: number;
+  rated_range_used?: number;
+  ideal_range_used?: number;
+  odometer_distance: number;
+  autopilot_distance?: number;
+  energy_used?: number;
+  tag?: string;
+
+  // Legacy field mappings for backward compatibility
+  start_date?: string;
+  end_date?: string;
+  start_address?: string;
+  end_address?: string;
   start_saved_location?: string;
-  end_latitude: number;
-  end_longitude: number;
-  end_address: string;
   end_saved_location?: string;
-  distance_miles: number;
-  duration_min: number;
-  start_odometer: number;
-  end_odometer: number;
-  start_battery_level: number;
-  end_battery_level: number;
-  start_est_battery_range: number;
-  end_est_battery_range: number;
-  start_rated_battery_range: number;
-  end_rated_battery_range: number;
-  start_ideal_battery_range: number;
-  end_ideal_battery_range: number;
+  distance_miles?: number;
+  duration_min?: number;
+  start_odometer?: number;
+  end_odometer?: number;
+  start_battery_level?: number;
+  end_battery_level?: number;
 }
 
 export interface TessieLocation {
@@ -135,10 +153,16 @@ export class TessieClient {
       if (endDate) params.append('end', endDate);
       params.append('limit', limit.toString());
 
-      const response: AxiosResponse<TessieDrive[]> = await this.client.get(
+      const response: AxiosResponse<{ results: TessieDrive[] } | TessieDrive[]> = await this.client.get(
         `/${vin}/drives?${params.toString()}`
       );
-      return response.data;
+
+      // Handle both old and new API response formats
+      if (response.data && typeof response.data === 'object' && 'results' in response.data) {
+        return response.data.results;
+      }
+
+      return response.data as TessieDrive[];
     } catch (error) {
       throw new Error(`Failed to get drives: ${error}`);
     }
@@ -164,9 +188,22 @@ export class TessieClient {
 
   async getVehicles(): Promise<Array<{ vin: string; display_name: string }>> {
     try {
-      const response: AxiosResponse<Array<{ vin: string; display_name: string }>> = 
+      const response: AxiosResponse<{ results: any[] } | any[]> =
         await this.client.get('/vehicles');
-      return response.data;
+
+      // Handle both old and new API response formats
+      let vehicles: any[];
+      if (response.data && typeof response.data === 'object' && 'results' in response.data) {
+        vehicles = response.data.results;
+      } else {
+        vehicles = response.data as any[];
+      }
+
+      // Extract VIN and display name from the new format
+      return vehicles.map(vehicle => ({
+        vin: vehicle.vin,
+        display_name: vehicle.last_state?.vehicle_state?.vehicle_name || vehicle.display_name || `Vehicle ${vehicle.vin.slice(-6)}`
+      }));
     } catch (error) {
       throw new Error(`Failed to get vehicles: ${error}`);
     }

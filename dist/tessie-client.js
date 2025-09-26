@@ -58,6 +58,10 @@ class TessieClient {
                 params.append('end', endDate);
             params.append('limit', limit.toString());
             const response = await this.client.get(`/${vin}/drives?${params.toString()}`);
+            // Handle both old and new API response formats
+            if (response.data && typeof response.data === 'object' && 'results' in response.data) {
+                return response.data.results;
+            }
             return response.data;
         }
         catch (error) {
@@ -79,7 +83,19 @@ class TessieClient {
     async getVehicles() {
         try {
             const response = await this.client.get('/vehicles');
-            return response.data;
+            // Handle both old and new API response formats
+            let vehicles;
+            if (response.data && typeof response.data === 'object' && 'results' in response.data) {
+                vehicles = response.data.results;
+            }
+            else {
+                vehicles = response.data;
+            }
+            // Extract VIN and display name from the new format
+            return vehicles.map(vehicle => ({
+                vin: vehicle.vin,
+                display_name: vehicle.last_state?.vehicle_state?.vehicle_name || vehicle.display_name || `Vehicle ${vehicle.vin.slice(-6)}`
+            }));
         }
         catch (error) {
             throw new Error(`Failed to get vehicles: ${error}`);

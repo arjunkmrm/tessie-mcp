@@ -274,23 +274,25 @@ class TessieMcpServer {
                     type: 'text',
                     text: JSON.stringify({
                         total_drives: drives.length,
-                        total_distance_miles: drives.reduce((sum, drive) => sum + drive.distance_miles, 0),
+                        total_distance_miles: drives.reduce((sum, drive) => sum + drive.odometer_distance, 0),
                         drives: drives.map(drive => ({
                             id: drive.id,
-                            date: drive.start_date,
+                            date: new Date(drive.started_at * 1000).toISOString(),
                             from: {
-                                address: drive.start_address,
-                                saved_location: drive.start_saved_location,
-                                odometer: drive.start_odometer,
+                                address: drive.starting_location,
+                                saved_location: drive.starting_saved_location,
+                                odometer: drive.starting_odometer,
                             },
                             to: {
-                                address: drive.end_address,
-                                saved_location: drive.end_saved_location,
-                                odometer: drive.end_odometer,
+                                address: drive.ending_location,
+                                saved_location: drive.ending_saved_location,
+                                odometer: drive.ending_odometer,
                             },
-                            distance_miles: drive.distance_miles,
-                            duration_minutes: drive.duration_min,
-                            battery_used: drive.start_battery_level - drive.end_battery_level,
+                            distance_miles: drive.odometer_distance,
+                            duration_minutes: Math.round((drive.ended_at - drive.started_at) / 60),
+                            battery_used: drive.starting_battery - drive.ending_battery,
+                            autopilot_miles: drive.autopilot_distance,
+                            fsd_available: drive.autopilot_distance !== null && drive.autopilot_distance !== undefined,
                         })),
                     }, null, 2),
                 },
@@ -301,10 +303,10 @@ class TessieMcpServer {
         const { vin, location, start_date, end_date } = args;
         const drives = await this.tessieClient.getDrives(vin, start_date, end_date);
         const locationLower = location.toLowerCase();
-        const matchingDrives = drives.filter(drive => drive.start_address.toLowerCase().includes(locationLower) ||
-            drive.end_address.toLowerCase().includes(locationLower) ||
-            (drive.start_saved_location && drive.start_saved_location.toLowerCase().includes(locationLower)) ||
-            (drive.end_saved_location && drive.end_saved_location.toLowerCase().includes(locationLower)));
+        const matchingDrives = drives.filter(drive => drive.starting_location.toLowerCase().includes(locationLower) ||
+            drive.ending_location.toLowerCase().includes(locationLower) ||
+            (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower)) ||
+            (drive.ending_saved_location && drive.ending_saved_location.toLowerCase().includes(locationLower)));
         return {
             content: [
                 {
@@ -313,19 +315,19 @@ class TessieMcpServer {
                         location_searched: location,
                         matching_drives: matchingDrives.length,
                         drives: matchingDrives.map(drive => ({
-                            date: drive.start_date,
-                            odometer_at_arrival: drive.start_address.toLowerCase().includes(locationLower) ||
-                                (drive.start_saved_location && drive.start_saved_location.toLowerCase().includes(locationLower))
-                                ? drive.start_odometer
-                                : drive.end_odometer,
-                            location_matched: drive.start_address.toLowerCase().includes(locationLower) ||
-                                (drive.start_saved_location && drive.start_saved_location.toLowerCase().includes(locationLower))
-                                ? drive.start_address
-                                : drive.end_address,
-                            saved_location: drive.start_address.toLowerCase().includes(locationLower) ||
-                                (drive.start_saved_location && drive.start_saved_location.toLowerCase().includes(locationLower))
-                                ? drive.start_saved_location
-                                : drive.end_saved_location,
+                            date: new Date(drive.started_at * 1000).toISOString(),
+                            odometer_at_arrival: drive.starting_location.toLowerCase().includes(locationLower) ||
+                                (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower))
+                                ? drive.starting_odometer
+                                : drive.ending_odometer,
+                            location_matched: drive.starting_location.toLowerCase().includes(locationLower) ||
+                                (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower))
+                                ? drive.starting_location
+                                : drive.ending_location,
+                            saved_location: drive.starting_location.toLowerCase().includes(locationLower) ||
+                                (drive.starting_saved_location && drive.starting_saved_location.toLowerCase().includes(locationLower))
+                                ? drive.starting_saved_location
+                                : drive.ending_saved_location,
                         })),
                     }, null, 2),
                 },
@@ -335,8 +337,10 @@ class TessieMcpServer {
     async handleGetWeeklyMileage(args) {
         const { vin, start_date, end_date } = args;
         const drives = await this.tessieClient.getDrives(vin, start_date, end_date);
-        const totalMiles = drives.reduce((sum, drive) => sum + drive.distance_miles, 0);
-        const totalDuration = drives.reduce((sum, drive) => sum + drive.duration_min, 0);
+        const totalMiles = drives.reduce((sum, drive) => sum + drive.odometer_distance, 0);
+        const totalDuration = drives.reduce((sum, drive) => sum + Math.round((drive.ended_at - drive.started_at) / 60), 0);
+        const totalAutopilotMiles = drives.reduce((sum, drive) => sum + (drive.autopilot_distance || 0), 0);
+        const drivesWithFSD = drives.filter(drive => drive.autopilot_distance && drive.autopilot_distance > 0);
         return {
             content: [
                 {
@@ -350,6 +354,13 @@ class TessieMcpServer {
                         total_drives: drives.length,
                         total_drive_time_hours: Math.round((totalDuration / 60) * 100) / 100,
                         average_miles_per_drive: drives.length > 0 ? Math.round((totalMiles / drives.length) * 100) / 100 : 0,
+                        fsd_analysis: {
+                            total_autopilot_miles: Math.round(totalAutopilotMiles * 100) / 100,
+                            fsd_percentage: totalMiles > 0 ? Math.round((totalAutopilotMiles / totalMiles) * 10000) / 100 : 0,
+                            drives_with_fsd: drivesWithFSD.length,
+                            fsd_data_available: drives.some(drive => drive.autopilot_distance !== null && drive.autopilot_distance !== undefined),
+                            note: totalAutopilotMiles === 0 ? "FSD data may not be available or no FSD usage detected" : undefined
+                        },
                         daily_breakdown: this.groupDrivesByDay(drives),
                     }, null, 2),
                 },
@@ -530,17 +541,20 @@ class TessieMcpServer {
     groupDrivesByDay(drives) {
         const dailyStats = {};
         drives.forEach(drive => {
-            const date = drive.start_date.split('T')[0]; // Get YYYY-MM-DD
+            const date = new Date(drive.started_at * 1000).toISOString().split('T')[0]; // Get YYYY-MM-DD
             if (!dailyStats[date]) {
-                dailyStats[date] = { miles: 0, drives: 0 };
+                dailyStats[date] = { miles: 0, drives: 0, autopilot_miles: 0 };
             }
-            dailyStats[date].miles += drive.distance_miles;
+            dailyStats[date].miles += drive.odometer_distance;
             dailyStats[date].drives += 1;
+            dailyStats[date].autopilot_miles += drive.autopilot_distance || 0;
         });
         return Object.entries(dailyStats).map(([date, stats]) => ({
             date,
             miles: Math.round(stats.miles * 100) / 100,
             drives: stats.drives,
+            autopilot_miles: Math.round(stats.autopilot_miles * 100) / 100,
+            fsd_percentage: stats.miles > 0 ? Math.round((stats.autopilot_miles / stats.miles) * 10000) / 100 : 0,
         }));
     }
     async run() {
