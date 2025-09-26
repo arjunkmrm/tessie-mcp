@@ -34,6 +34,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.configSchema = void 0;
 exports.default = default_1;
 const dotenv = __importStar(require("dotenv"));
 dotenv.config();
@@ -41,9 +42,15 @@ const index_js_1 = require("@modelcontextprotocol/sdk/server/index.js");
 const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
 const types_js_1 = require("@modelcontextprotocol/sdk/types.js");
 const tessie_client_js_1 = require("./tessie-client.js");
+const zod_1 = require("zod");
+exports.configSchema = zod_1.z.object({
+    tessie_api_token: zod_1.z.string().describe("Tessie API token for accessing vehicle data"),
+});
 class TessieMcpServer {
-    constructor() {
+    constructor(config) {
         this.tessieClient = null;
+        this.config = null;
+        this.config = config || null;
         this.server = new index_js_1.Server({
             name: 'tessie-mcp-server',
             version: '1.0.0',
@@ -173,10 +180,12 @@ class TessieMcpServer {
             const { name, arguments: args } = request.params;
             try {
                 if (!this.tessieClient) {
-                    // Try user config from extension, then environment variables
-                    const accessToken = process.env.tessie_api_token || process.env.TESSIE_ACCESS_TOKEN;
+                    // Try config first, then environment variables as fallback
+                    const accessToken = this.config?.tessie_api_token ||
+                        process.env.tessie_api_token ||
+                        process.env.TESSIE_ACCESS_TOKEN;
                     if (!accessToken) {
-                        throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidRequest, 'Tessie API token is required. Please configure it in the extension settings or set TESSIE_ACCESS_TOKEN environment variable.');
+                        throw new types_js_1.McpError(types_js_1.ErrorCode.InvalidRequest, 'Tessie API token is required. Please configure it in the server settings or set TESSIE_ACCESS_TOKEN environment variable.');
                     }
                     this.tessieClient = new tessie_client_js_1.TessieClient(accessToken);
                 }
@@ -364,7 +373,7 @@ if (require.main === module) {
 }
 // Smithery-compliant export (stateless)
 function default_1({ config }) {
-    const server = new TessieMcpServer();
+    const server = new TessieMcpServer(config);
     return {
         async start() {
             await server.run();

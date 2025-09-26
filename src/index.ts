@@ -12,12 +12,19 @@ import {
   McpError,
 } from '@modelcontextprotocol/sdk/types.js';
 import { TessieClient } from './tessie-client.js';
+import { z } from 'zod';
+
+export const configSchema = z.object({
+  tessie_api_token: z.string().describe("Tessie API token for accessing vehicle data"),
+});
 
 class TessieMcpServer {
   private server: Server;
   private tessieClient: TessieClient | null = null;
+  private config: z.infer<typeof configSchema> | null = null;
 
-  constructor() {
+  constructor(config?: z.infer<typeof configSchema>) {
+    this.config = config || null;
     this.server = new Server(
       {
         name: 'tessie-mcp-server',
@@ -155,12 +162,14 @@ class TessieMcpServer {
 
       try {
         if (!this.tessieClient) {
-          // Try user config from extension, then environment variables
-          const accessToken = process.env.tessie_api_token || process.env.TESSIE_ACCESS_TOKEN;
+          // Try config first, then environment variables as fallback
+          const accessToken = this.config?.tessie_api_token ||
+                             process.env.tessie_api_token ||
+                             process.env.TESSIE_ACCESS_TOKEN;
           if (!accessToken) {
             throw new McpError(
               ErrorCode.InvalidRequest,
-              'Tessie API token is required. Please configure it in the extension settings or set TESSIE_ACCESS_TOKEN environment variable.'
+              'Tessie API token is required. Please configure it in the server settings or set TESSIE_ACCESS_TOKEN environment variable.'
             );
           }
           this.tessieClient = new TessieClient(accessToken);
@@ -373,8 +382,8 @@ if (require.main === module) {
 }
 
 // Smithery-compliant export (stateless)
-export default function({ config }: { config?: any }) {
-  const server = new TessieMcpServer();
+export default function({ config }: { config?: z.infer<typeof configSchema> }) {
+  const server = new TessieMcpServer(config);
 
   return {
     async start() {

@@ -1,8 +1,17 @@
 #!/usr/bin/env node
+import { z } from 'zod';
+export declare const configSchema: z.ZodObject<{
+    tessie_api_token: z.ZodString;
+}, "strip", z.ZodTypeAny, {
+    tessie_api_token: string;
+}, {
+    tessie_api_token: string;
+}>;
 declare class TessieMcpServer {
     private server;
     private tessieClient;
-    constructor();
+    private config;
+    constructor(config?: z.infer<typeof configSchema>);
     private setupErrorHandling;
     private setupToolHandlers;
     private handleGetVehicleCurrentState;
@@ -14,7 +23,7 @@ declare class TessieMcpServer {
     run(): Promise<void>;
 }
 export default function ({ config }: {
-    config?: any;
+    config?: z.infer<typeof configSchema>;
 }): {
     start(): Promise<TessieMcpServer>;
     stop(): Promise<void>;
