@@ -7,7 +7,7 @@ import { DriveAnalyzer } from './drive-analyzer.js';
 
 // Configuration schema - automatically detected by Smithery
 export const configSchema = z.object({
-  tessie_api_token: z.string().optional().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
+  tessie_api_token: z.string().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
   debug: z.boolean().default(false).optional().describe("Enable debug logging"),
 });
 
@@ -22,7 +22,7 @@ export const stateless = true;
  * natural language queries, and comprehensive drive analysis with merging.
  */
 
-export default function ({ config }: { config: z.infer<typeof configSchema> }) {
+export default function ({ config }: { config: z.infer<typeof configSchema> | undefined }) {
   try {
     // Log function entry for debugging
     console.log('[tessie-mcp] ========= TESSIE SERVER FUNCTION CALLED =========');
@@ -42,7 +42,7 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
     });
 
     // Initialize clients - handle missing API token gracefully
-    const apiToken = config.tessie_api_token || process.env.TESSIE_API_TOKEN || process.env.tessie_api_token;
+    const apiToken = config?.tessie_api_token || process.env.TESSIE_API_TOKEN || process.env.tessie_api_token;
 
     // Create clients conditionally - tools will check for apiToken and return appropriate errors
     let tessieClient: TessieClient | null = null;
