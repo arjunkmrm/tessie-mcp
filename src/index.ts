@@ -8,7 +8,8 @@ import { DriveAnalyzer } from './drive-analyzer.js';
 // Configuration schema - automatically detected by Smithery
 export const configSchema = z.object({
   apiKey: z.string().describe("Your API key"),
-  modelName: z.string().default("tessie").describe("Model to use"),
+  modelName: z.string().default("gpt-4").describe("Model to use"),
+  temperature: z.number().min(0).max(1).default(0.7).describe("Temperature setting"),
 });
 
 export default function createServer({
@@ -22,6 +23,9 @@ export default function createServer({
       title: "Tessie Vehicle Data",
       version: "1.1.1"
     });
+
+    // Use config values in your tools
+    console.log(`Using model: ${config.modelName}`);
 
     // Initialize clients
     const apiToken = config.apiKey;
