@@ -24,14 +24,20 @@ export const stateless = true;
 
 export default function ({ config }: { config: z.infer<typeof configSchema> }) {
   try {
+    // Log function entry for debugging
+    console.log('[tessie-mcp] ========= TESSIE SERVER FUNCTION CALLED =========');
+    console.log('[tessie-mcp] Function called with config:', config);
+    console.log('[tessie-mcp] Config type:', typeof config);
+    console.log('[tessie-mcp] Config keys:', config ? Object.keys(config) : 'config is null/undefined');
+
+    try {
     // Add debugging for HTTP transport issues
-    if (process.env.NODE_ENV !== 'production') {
-      console.log('[tessie-mcp] Server starting with config:', JSON.stringify(config, null, 2));
-    }
+    console.log('[tessie-mcp] Server starting with config:', JSON.stringify(config, null, 2));
 
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
+      title: "Tessie Vehicle Data",
       version: "1.1.1"
     });
 
@@ -431,5 +437,14 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
       console.error('[tessie-mcp] Error stack:', error.stack);
     }
     throw new Error(`Server initialization error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  } catch (outerError) {
+    // Catch any errors that happen even before server creation
+    console.error('[tessie-mcp] ========= OUTER FUNCTION ERROR =========');
+    console.error('[tessie-mcp] Function failed completely:', outerError);
+    if (outerError instanceof Error) {
+      console.error('[tessie-mcp] Outer error stack:', outerError.stack);
+    }
+    throw outerError;
   }
 }
