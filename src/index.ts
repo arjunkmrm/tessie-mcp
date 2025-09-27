@@ -30,16 +30,17 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
       version: "1.0.0"
     });
 
-    // Initialize clients - handle missing API token
+    // Initialize clients - handle missing API token gracefully
     const apiToken = config.tessie_api_token || process.env.TESSIE_API_TOKEN || process.env.tessie_api_token;
 
-    if (!apiToken) {
-      throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
-    }
-
-    const tessieClient = new TessieClient(apiToken);
+    // Create clients conditionally - tools will check for apiToken and return appropriate errors
+    let tessieClient: TessieClient | null = null;
     const queryOptimizer = new TessieQueryOptimizer();
     const driveAnalyzer = new DriveAnalyzer();
+
+    if (apiToken) {
+      tessieClient = new TessieClient(apiToken);
+    }
 
     // Register get_vehicle_current_state tool
     server.tool(
@@ -50,6 +51,9 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
         use_cache: z.boolean().optional().default(true).describe("Whether to use cached data to avoid waking the vehicle")
       },
       async ({ vin, use_cache = true }) => {
+        if (!tessieClient) {
+          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
+        }
         try {
           const state = await tessieClient.getVehicleState(vin, use_cache);
           return {
@@ -94,6 +98,9 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
         limit: z.number().optional().default(50).describe("Maximum number of drives to return")
       },
       async ({ vin, start_date, end_date, limit = 50 }) => {
+        if (!tessieClient) {
+          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
+        }
         try {
           const drives = await tessieClient.getDrives(vin, start_date, end_date, limit);
           return {
@@ -135,6 +142,9 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
         end_date: z.string().describe("End date of the period (ISO format)")
       },
       async ({ vin, start_date, end_date }) => {
+        if (!tessieClient) {
+          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
+        }
         try {
           const drives = await tessieClient.getDrives(vin, start_date, end_date, 500);
 
@@ -188,6 +198,9 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
         days_back: z.number().optional().default(7).describe("Number of days to look back for recent drives")
       },
       async ({ vin, days_back = 7 }) => {
+        if (!tessieClient) {
+          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
+        }
         try {
           // Calculate date range for recent drives
           const endDate = new Date();
@@ -274,6 +287,9 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
       "List all vehicles in the Tessie account",
       {},
       async () => {
+        if (!tessieClient) {
+          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
+        }
         try {
           const vehicles = await tessieClient.getVehicles();
           return {
