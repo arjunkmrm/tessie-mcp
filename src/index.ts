@@ -7,21 +7,15 @@ import { DriveAnalyzer } from './drive-analyzer.js';
 
 // Configuration schema - automatically detected by Smithery
 export const configSchema = z.object({
-  apiKey: z.string().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
-})
+  apiKey: z.string().describe("Your API key"),
+  modelName: z.string().default("tessie").describe("Model to use"),
+});
 
-// Export stateless flag for MCP
-export const stateless = true;
-
-/**
- * Tessie Vehicle Data MCP Server
- *
- * This MCP server integrates with Tessie API to provide Tesla vehicle data access.
- * Features include real-time vehicle state, driving history, mileage tracking,
- * natural language queries, and comprehensive drive analysis with merging.
- */
-
-export default function createServer({ config }: { config: z.infer<typeof configSchema> }) {
+export default function createServer({
+  config
+}: {
+  config: z.infer<typeof configSchema>
+}) {
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
