@@ -5,10 +5,10 @@ import { TessieClient } from './tessie-client.js';
 import { TessieQueryOptimizer } from './query-optimizer.js';
 import { DriveAnalyzer } from './drive-analyzer.js';
 
-// Configuration schema - automatically detected by Smithery
-export const configSchema = z.object({
-  tessie_api_token: z.string().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
-})
+// Configuration will be handled by smithery.yaml
+// export const configSchema = z.object({
+//   tessie_api_token: z.string().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
+// })
 
 // Export stateless flag for MCP
 export const stateless = true;
@@ -21,7 +21,7 @@ export const stateless = true;
  * natural language queries, and comprehensive drive analysis with merging.
  */
 
-export default function createTessieMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
+export default function createTessieMcpServer({ config }: { config?: any }) {
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
