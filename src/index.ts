@@ -32,7 +32,7 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
-      version: "1.0.0"
+      version: "1.1.1"
     });
 
     // Initialize clients - handle missing API token gracefully

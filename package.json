@@ -1,6 +1,6 @@
 {
   "name": "tessie-mcp-server",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "description": "MCP server for Tessie API vehicle data queries with drive analysis and natural language processing",
   "type": "module",
   "module": "./src/index.ts",
@@ -11,9 +11,10 @@
     ".smithery"
   ],
   "scripts": {
-    "build": "npm run build:shttp",
+    "build": "npm run build:stdio",
     "build:stdio": "npx @smithery/cli build src/index.ts --transport stdio && echo '#!/usr/bin/env node' | cat - .smithery/index.cjs > temp && mv temp .smithery/index.cjs && chmod +x .smithery/index.cjs",
     "build:shttp": "npx @smithery/cli build src/index.ts --transport shttp",
+    "build:all": "npm run build:stdio && npm run build:shttp",
     "prepare": "npm run build:stdio",
     "dev": "npx @smithery/cli dev",
     "test": "jest",
