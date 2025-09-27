@@ -8,6 +8,7 @@ import { DriveAnalyzer } from './drive-analyzer.js';
 // Configuration schema - automatically detected by Smithery
 export const configSchema = z.object({
   tessie_api_token: z.string().optional().describe("Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api"),
+  debug: z.boolean().default(false).optional().describe("Enable debug logging"),
 });
 
 // Export stateless flag for MCP
