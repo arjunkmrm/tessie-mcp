@@ -21,7 +21,7 @@ export const stateless = true;
  * natural language queries, and comprehensive drive analysis with merging.
  */
 
-export default function createServer({ config }: { config?: z.infer<typeof configSchema> }) {
+export default function createServer({ config }: { config: z.infer<typeof configSchema> }) {
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
@@ -29,8 +29,8 @@ export default function createServer({ config }: { config?: z.infer<typeof confi
       version: "1.1.1"
     });
 
-    // Initialize clients - handle both config parameter and URL query params
-    const apiToken = config?.apiKey || process.env.API_KEY;
+    // Initialize clients
+    const apiToken = config.apiKey;
 
     // Create clients with provided API token
     const tessieClient = new TessieClient(apiToken);
