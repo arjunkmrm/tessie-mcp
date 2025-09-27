@@ -21,7 +21,7 @@ export const stateless = true;
  * natural language queries, and comprehensive drive analysis with merging.
  */
 
-export default function createTessieMcpServer({ config }: { config: z.infer<typeof configSchema> }) {
+export default function createServer({ config }: { config: z.infer<typeof configSchema> }) {
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
