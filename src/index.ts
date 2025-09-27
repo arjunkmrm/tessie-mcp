@@ -24,6 +24,11 @@ export const stateless = true;
 
 export default function ({ config }: { config: z.infer<typeof configSchema> }) {
   try {
+    // Add debugging for HTTP transport issues
+    if (process.env.NODE_ENV !== 'production') {
+      console.log('[tessie-mcp] Server starting with config:', JSON.stringify(config, null, 2));
+    }
+
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
@@ -420,6 +425,11 @@ export default function ({ config }: { config: z.infer<typeof configSchema> }) {
     return server.server;
 
   } catch (error) {
+    // Log error details for debugging HTTP transport issues
+    console.error('[tessie-mcp] Server initialization failed:', error);
+    if (error instanceof Error) {
+      console.error('[tessie-mcp] Error stack:', error.stack);
+    }
     throw new Error(`Server initialization error: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
