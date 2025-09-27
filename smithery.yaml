@@ -1,1 +1,13 @@
-runtime: typescript
+# Smithery configuration file: https://smithery.ai/docs/config#smitheryyaml
+
+startCommand:
+  type: shttp
+  configSchema:
+    # JSON Schema defining the configuration options for the MCP.
+    type: object
+    required:
+      - tessie_api_token
+    properties:
+      tessie_api_token:
+        type: string
+        description: Tessie API token for accessing vehicle data. Get your token from https://my.tessie.com/settings/api
