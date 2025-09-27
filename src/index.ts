@@ -22,28 +22,7 @@ export const stateless = true;
  * natural language queries, and comprehensive drive analysis with merging.
  */
 
-// Add logging at module level before function export
-console.log('[tessie-mcp] ========= MODULE LOADING =========');
-console.log('[tessie-mcp] Tessie MCP module loading at:', new Date().toISOString());
-
-export default function ({ config }: { config: z.infer<typeof configSchema> | undefined }) {
-  // Immediate logging with process info
-  process.stdout.write(`[tessie-mcp] ========= FUNCTION ENTRY ${new Date().toISOString()} =========\n`);
-  process.stderr.write(`[tessie-mcp] STDERR: Function called with config: ${JSON.stringify(config)}\n`);
-
-  try {
-    // Log function entry for debugging
-    console.log('[tessie-mcp] ========= TESSIE SERVER FUNCTION CALLED =========');
-    console.log('[tessie-mcp] Function called with config:', config);
-    console.log('[tessie-mcp] Config type:', typeof config);
-    console.log('[tessie-mcp] Config keys:', config ? Object.keys(config) : 'config is null/undefined');
-    console.log('[tessie-mcp] Node env:', process.env.NODE_ENV);
-    console.log('[tessie-mcp] Process argv:', process.argv.slice(0, 3));
-
-    try {
-    // Add debugging for HTTP transport issues
-    console.log('[tessie-mcp] Server starting with config:', JSON.stringify(config, null, 2));
-
+export default function ({ config }: { config: z.infer<typeof configSchema> }) {
     // Create MCP server
     const server = new McpServer({
       name: "tessie-mcp-server",
@@ -51,17 +30,13 @@ export default function ({ config }: { config: z.infer<typeof configSchema> | un
       version: "1.1.1"
     });
 
-    // Initialize clients - handle missing API token gracefully
-    const apiToken = config?.tessie_api_token || process.env.TESSIE_API_TOKEN || process.env.tessie_api_token;
+    // Initialize clients
+    const apiToken = config.tessie_api_token;
 
-    // Create clients conditionally - tools will check for apiToken and return appropriate errors
-    let tessieClient: TessieClient | null = null;
+    // Create clients with provided API token
+    const tessieClient = new TessieClient(apiToken);
     const queryOptimizer = new TessieQueryOptimizer();
     const driveAnalyzer = new DriveAnalyzer();
-
-    if (apiToken) {
-      tessieClient = new TessieClient(apiToken);
-    }
 
     // Register get_vehicle_current_state tool
     server.tool(
@@ -72,9 +47,6 @@ export default function ({ config }: { config: z.infer<typeof configSchema> | un
         use_cache: z.boolean().optional().default(true).describe("Whether to use cached data to avoid waking the vehicle")
       },
       async ({ vin, use_cache = true }) => {
-        if (!tessieClient) {
-          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
-        }
         try {
           const state = await tessieClient.getVehicleState(vin, use_cache);
           return {
@@ -119,9 +91,6 @@ export default function ({ config }: { config: z.infer<typeof configSchema> | un
         limit: z.number().optional().default(50).describe("Maximum number of drives to return")
       },
       async ({ vin, start_date, end_date, limit = 50 }) => {
-        if (!tessieClient) {
-          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
-        }
         try {
           const drives = await tessieClient.getDrives(vin, start_date, end_date, limit);
           return {
@@ -163,9 +132,6 @@ export default function ({ config }: { config: z.infer<typeof configSchema> | un
         end_date: z.string().describe("End date of the period (ISO format)")
       },
       async ({ vin, start_date, end_date }) => {
-        if (!tessieClient) {
-          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
-        }
         try {
           const drives = await tessieClient.getDrives(vin, start_date, end_date, 500);
 
@@ -219,9 +185,6 @@ export default function ({ config }: { config: z.infer<typeof configSchema> | un
         days_back: z.number().optional().default(7).describe("Number of days to look back for recent drives")
       },
       async ({ vin, days_back = 7 }) => {
-        if (!tessieClient) {
-          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
-        }
         try {
           // Calculate date range for recent drives
           const endDate = new Date();
@@ -308,9 +271,6 @@ export default function ({ config }: { config: z.infer<typeof configSchema> | un
       "List all vehicles in the Tessie account",
       {},
       async () => {
-        if (!tessieClient) {
-          throw new Error("Tessie API token is required. Please configure tessie_api_token or set TESSIE_API_TOKEN environment variable. Get your token from https://my.tessie.com/settings/api");
-        }
         try {
           const vehicles = await tessieClient.getVehicles();
           return {
@@ -439,22 +399,4 @@ export default function ({ config }: { config: z.infer<typeof configSchema> | un
 
     // Return the server object (Smithery CLI handles transport)
     return server.server;
-
-  } catch (error) {
-    // Log error details for debugging HTTP transport issues
-    console.error('[tessie-mcp] Server initialization failed:', error);
-    if (error instanceof Error) {
-      console.error('[tessie-mcp] Error stack:', error.stack);
-    }
-    throw new Error(`Server initialization error: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  } catch (outerError) {
-    // Catch any errors that happen even before server creation
-    console.error('[tessie-mcp] ========= OUTER FUNCTION ERROR =========');
-    console.error('[tessie-mcp] Function failed completely:', outerError);
-    if (outerError instanceof Error) {
-      console.error('[tessie-mcp] Outer error stack:', outerError.stack);
-    }
-    throw outerError;
-  }
 }
