@@ -22,13 +22,23 @@ export const stateless = true;
  * natural language queries, and comprehensive drive analysis with merging.
  */
 
+// Add logging at module level before function export
+console.log('[tessie-mcp] ========= MODULE LOADING =========');
+console.log('[tessie-mcp] Tessie MCP module loading at:', new Date().toISOString());
+
 export default function ({ config }: { config: z.infer<typeof configSchema> | undefined }) {
+  // Immediate logging with process info
+  process.stdout.write(`[tessie-mcp] ========= FUNCTION ENTRY ${new Date().toISOString()} =========\n`);
+  process.stderr.write(`[tessie-mcp] STDERR: Function called with config: ${JSON.stringify(config)}\n`);
+
   try {
     // Log function entry for debugging
     console.log('[tessie-mcp] ========= TESSIE SERVER FUNCTION CALLED =========');
     console.log('[tessie-mcp] Function called with config:', config);
     console.log('[tessie-mcp] Config type:', typeof config);
     console.log('[tessie-mcp] Config keys:', config ? Object.keys(config) : 'config is null/undefined');
+    console.log('[tessie-mcp] Node env:', process.env.NODE_ENV);
+    console.log('[tessie-mcp] Process argv:', process.argv.slice(0, 3));
 
     try {
     // Add debugging for HTTP transport issues
