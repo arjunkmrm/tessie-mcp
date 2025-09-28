@@ -18,7 +18,7 @@ An advanced Tesla analytics platform for Claude Desktop through the [Tessie API]
 
 ### Installing via Smithery
 
-To install tessie-mcp automatically via [Smithery](https://smithery.ai/server/@keithah/tessie-mcp):
+To install Tessie MCP automatically via [Smithery](https://smithery.ai/server/@keithah/tessie-mcp):
 
 ```bash
 npx -y @smithery/cli install @keithah/tessie-mcp
