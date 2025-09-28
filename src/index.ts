@@ -8,8 +8,6 @@ import { DriveAnalyzer } from './drive-analyzer.js';
 // Configuration schema - automatically detected by Smithery
 export const configSchema = z.object({
   apiKey: z.string().describe("Your API key"),
-  modelName: z.string().default("gpt-4").describe("Model to use"),
-  temperature: z.number().min(0).max(1).default(0.7).describe("Temperature setting"),
 });
 
 export default function createServer({
