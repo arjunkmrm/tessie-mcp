@@ -2,6 +2,7 @@
 
 [![smithery badge](https://smithery.ai/badge/@keithah/tessie-mcp)](https://smithery.ai/server/@keithah/tessie-mcp)
 
+
 An advanced Tesla analytics platform for Claude Desktop through the [Tessie API](https://tessie.com). This extension provides 39+ tools for comprehensive vehicle data access, advanced analytics, experimental FSD detection, and data export capabilities.
 
 ## Features
